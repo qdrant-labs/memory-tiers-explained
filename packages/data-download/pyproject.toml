@@ -1,0 +1,19 @@
+[project]
+name = "data-download"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { email = "astraberte9@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "huggingface-hub>=1.26.1",
+]
+
+[project.scripts]
+data-download = "data_download:main"
+
+[build-system]
+requires = ["uv_build>=0.12.2,<0.13.0"]
+build-backend = "uv_build"

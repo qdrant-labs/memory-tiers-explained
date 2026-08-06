@@ -4,11 +4,11 @@ use qdrant_client::{
         BoolIndexParamsBuilder, CollectionExistsRequest, CreateCollectionBuilder,
         CreateFieldIndexCollectionBuilder, DatetimeIndexParamsBuilder, Distance, FieldType,
         FloatIndexParamsBuilder, GeoIndexParamsBuilder, HnswConfigDiffBuilder,
-        IntegerIndexParamsBuilder, KeywordIndexParamsBuilder, Memory, PayloadStorageParamsBuilder,
-        SparseIndexConfigBuilder, SparseVectorConfig, SparseVectorParamsBuilder,
-        SparseVectorsConfigBuilder, TextIndexParamsBuilder, TokenizerType, TurboQuantBitSize,
-        TurboQuantizationBuilder, UuidIndexParamsBuilder, VectorParamsBuilder, VectorsConfig,
-        VectorsConfigBuilder,
+        IntegerIndexParamsBuilder, KeywordIndexParamsBuilder, Memory, OptimizersConfigDiffBuilder,
+        PayloadStorageParamsBuilder, SparseIndexConfigBuilder, SparseVectorConfig,
+        SparseVectorParamsBuilder, SparseVectorsConfigBuilder, TextIndexParamsBuilder,
+        TokenizerType, TurboQuantBitSize, TurboQuantizationBuilder, UuidIndexParamsBuilder,
+        VectorParamsBuilder, VectorsConfig, VectorsConfigBuilder,
     },
 };
 use std::{
@@ -128,6 +128,8 @@ pub struct MemoryTiersSetup {
     pub sparse_vector_index: Option<MemoryTier>,
     pub payloads: Option<MemoryTier>,
     pub payload_index: Option<MemoryTier>,
+    pub mmap_threshold: Option<u64>,
+    pub indexing_theshold: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -181,6 +183,19 @@ impl CollectionSetupWiz {
             return Err(SetupError::CollectionAlreadyExistsError);
         }
         let mut collection_builder = CreateCollectionBuilder::new(collection_name);
+        let mut optimizer_config: Option<OptimizersConfigDiffBuilder> = None;
+        if let Some(mt) = memory_tiers_setup.mmap_threshold {
+            optimizer_config = Some(OptimizersConfigDiffBuilder::default().memmap_threshold(mt));
+        }
+        if let Some(it) = memory_tiers_setup.indexing_theshold {
+            optimizer_config = Some(optimizer_config.map_or(
+                OptimizersConfigDiffBuilder::default().indexing_threshold(it),
+                |p| p.indexing_threshold(it),
+            ));
+        }
+        if let Some(oc) = optimizer_config {
+            collection_builder = collection_builder.optimizers_config(oc.build());
+        }
         if let Some(dv) = memory_tiers_setup.dense_vectors {
             let mut vectors_builder =
                 VectorParamsBuilder::new(768, Distance::Cosine).memory(dv.into_memory());

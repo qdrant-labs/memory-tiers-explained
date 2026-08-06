@@ -1,0 +1,3 @@
+storage:
+  performance:
+    async_scorer: true

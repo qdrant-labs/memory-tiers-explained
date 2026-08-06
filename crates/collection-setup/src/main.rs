@@ -28,6 +28,12 @@ struct CliArgs {
     payload_memory: Option<String>,
     #[arg(long, default_value = None)]
     payload_index_memory: Option<String>,
+    #[arg(long, default_value = None)]
+    mmap_threshold: Option<u64>,
+    #[arg(long, default_value = None)]
+    indexing_threshold: Option<u64>,
+    #[arg(long, default_value_t = false)]
+    io_uring: bool,
     #[arg(long)]
     field_to_index: Vec<String>,
     #[arg(long, default_value = None)]
@@ -89,6 +95,8 @@ async fn main() -> Result<(), SetupError> {
             None => None,
             Some(s) => Some(MemoryTier::from_str(&s)?),
         },
+        mmap_threshold: args.mmap_threshold,
+        indexing_theshold: args.indexing_threshold,
     };
     let mut to_index: HashMap<String, PayloadFieldType> = HashMap::new();
     for k in args.field_to_index {
