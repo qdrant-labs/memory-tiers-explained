@@ -6,4 +6,4 @@ services:
       - 6334:6334
     volumes:
       - ./storage:/qdrant/storage
-      - ./configs/io-uring.yaml:/qdrant/config.yaml
+      - ./configs/io-uring.yaml:/qdrant/config/config.yaml

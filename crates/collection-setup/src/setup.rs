@@ -5,10 +5,11 @@ use qdrant_client::{
         CreateFieldIndexCollectionBuilder, DatetimeIndexParamsBuilder, Distance, FieldType,
         FloatIndexParamsBuilder, GeoIndexParamsBuilder, HnswConfigDiffBuilder,
         IntegerIndexParamsBuilder, KeywordIndexParamsBuilder, Memory, OptimizersConfigDiffBuilder,
-        PayloadStorageParamsBuilder, SparseIndexConfigBuilder, SparseVectorConfig,
-        SparseVectorParamsBuilder, SparseVectorsConfigBuilder, TextIndexParamsBuilder,
-        TokenizerType, TurboQuantBitSize, TurboQuantizationBuilder, UuidIndexParamsBuilder,
-        VectorParamsBuilder, VectorsConfig, VectorsConfigBuilder,
+        PayloadStorageParamsBuilder, QuantizationType, ScalarQuantizationBuilder,
+        SparseIndexConfigBuilder, SparseVectorConfig, SparseVectorParamsBuilder,
+        SparseVectorsConfigBuilder, TextIndexParamsBuilder, TokenizerType, TurboQuantBitSize,
+        TurboQuantizationBuilder, UuidIndexParamsBuilder, VectorParamsBuilder, VectorsConfig,
+        VectorsConfigBuilder,
     },
 };
 use std::{
@@ -126,6 +127,7 @@ pub struct MemoryTiersSetup {
     pub hnsw_config: Option<HnswTierConfig>,
     pub quantization: Option<QuantizationTierConfig>,
     pub sparse_vector_index: Option<MemoryTier>,
+    pub use_sparse: bool,
     pub payloads: Option<MemoryTier>,
     pub payload_index: Option<MemoryTier>,
     pub mmap_threshold: Option<u64>,
@@ -198,11 +200,11 @@ impl CollectionSetupWiz {
         }
         if let Some(dv) = memory_tiers_setup.dense_vectors {
             let mut vectors_builder =
-                VectorParamsBuilder::new(768, Distance::Cosine).memory(dv.into_memory());
+                VectorParamsBuilder::new(1024, Distance::Cosine).memory(dv.into_memory());
             if let Some(qt) = memory_tiers_setup.quantization {
                 if qt.quantized {
                     let mut quant_builder =
-                        TurboQuantizationBuilder::default().bits(TurboQuantBitSize::Bits4);
+                        ScalarQuantizationBuilder::default().r#type(QuantizationType::Int8.into());
                     if let Some(mem) = qt.memory_tier {
                         quant_builder = quant_builder.memory(mem.into_memory());
                     }
@@ -215,7 +217,7 @@ impl CollectionSetupWiz {
                     .to_owned(),
             ));
         } else {
-            let mut vectors_builder = VectorParamsBuilder::new(768, Distance::Cosine);
+            let mut vectors_builder = VectorParamsBuilder::new(1024, Distance::Cosine);
             if let Some(qt) = memory_tiers_setup.quantization {
                 if qt.quantized {
                     let mut quant_builder =
@@ -237,22 +239,27 @@ impl CollectionSetupWiz {
                     .hnsw_config(HnswConfigDiffBuilder::default().memory(mt.into_memory()))
             }
         }
-        if let Some(sp) = memory_tiers_setup.sparse_vector_index {
-            collection_builder = collection_builder.sparse_vectors_config(SparseVectorConfig::from(
-                SparseVectorsConfigBuilder::default()
-                    .add_named_vector_params(
-                        "sparse",
-                        SparseVectorParamsBuilder::default()
-                            .index(SparseIndexConfigBuilder::default().memory(sp.into_memory())),
-                    )
-                    .to_owned(),
-            ))
-        } else {
-            collection_builder = collection_builder.sparse_vectors_config(SparseVectorConfig::from(
-                SparseVectorsConfigBuilder::default()
-                    .add_named_vector_params("sparse", SparseVectorParamsBuilder::default())
-                    .to_owned(),
-            ))
+        if memory_tiers_setup.use_sparse {
+            if let Some(sp) = memory_tiers_setup.sparse_vector_index {
+                collection_builder =
+                    collection_builder.sparse_vectors_config(SparseVectorConfig::from(
+                        SparseVectorsConfigBuilder::default()
+                            .add_named_vector_params(
+                                "sparse",
+                                SparseVectorParamsBuilder::default().index(
+                                    SparseIndexConfigBuilder::default().memory(sp.into_memory()),
+                                ),
+                            )
+                            .to_owned(),
+                    ))
+            } else {
+                collection_builder =
+                    collection_builder.sparse_vectors_config(SparseVectorConfig::from(
+                        SparseVectorsConfigBuilder::default()
+                            .add_named_vector_params("sparse", SparseVectorParamsBuilder::default())
+                            .to_owned(),
+                    ))
+            }
         }
         if let Some(pay) = memory_tiers_setup.payloads {
             collection_builder = collection_builder.payload(

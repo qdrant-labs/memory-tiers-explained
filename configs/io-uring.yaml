@@ -1,3 +1,6 @@
+service:
+  hardware_reporting: true
+
 storage:
   performance:
     async_scorer: true

@@ -24,6 +24,8 @@ struct CliArgs {
     quantized_vectors_memory: Option<String>,
     #[arg(long, default_value = None)]
     sparse_vector_index_memory: Option<String>,
+    #[arg(long, default_value_t = false)]
+    use_sparse: bool,
     #[arg(long, default_value = None)]
     payload_memory: Option<String>,
     #[arg(long, default_value = None)]
@@ -97,6 +99,7 @@ async fn main() -> Result<(), SetupError> {
         },
         mmap_threshold: args.mmap_threshold,
         indexing_theshold: args.indexing_threshold,
+        use_sparse: args.use_sparse,
     };
     let mut to_index: HashMap<String, PayloadFieldType> = HashMap::new();
     for k in args.field_to_index {

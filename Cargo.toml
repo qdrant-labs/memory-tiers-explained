@@ -6,3 +6,4 @@ members = ["crates/*"]
 qdrant-client = "1.19"
 clap = { version = "4.6",  features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+thiserror = "2.0"
