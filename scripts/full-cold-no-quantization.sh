@@ -29,3 +29,6 @@ do
         cargo run --bin benchmark -- upload $file $COLLECTION_NAME --verbose
     fi
 done
+
+./scripts/poll-for-green.sh $COLLECTION_NAME
+./scripts/delete-collection.sh $COLLECTION_NAME

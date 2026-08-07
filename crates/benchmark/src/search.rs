@@ -74,55 +74,83 @@ async fn snapshot_collection(
     })
 }
 
-/// Global process memory (jemalloc stats), read from the REST `/telemetry`
-/// endpoint - the gRPC API this benchmark otherwise uses doesn't expose it.
+/// disk/ram/cached bytes for one storage component, as reported by the
+/// collection memory endpoint. `expected_cache_bytes` is how much of it Qdrant
+/// wants resident in the page cache; `cached_bytes` is how much actually is.
 #[derive(Debug, Clone, Copy, Default, Deserialize)]
-pub struct TelemetryMemory {
-    pub active_bytes: u64,
-    pub allocated_bytes: u64,
-    pub metadata_bytes: u64,
-    pub resident_bytes: u64,
-    pub retained_bytes: u64,
+pub struct MemoryUsage {
+    pub disk_bytes: u64,
+    pub ram_bytes: u64,
+    pub cached_bytes: u64,
+    pub expected_cache_bytes: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct VectorMemory {
+    pub name: String,
+    pub storage: MemoryUsage,
+    pub index: MemoryUsage,
+    pub quantized: Option<MemoryUsage>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PayloadIndexMemory {
+    pub name: String,
+    pub usage: MemoryUsage,
+}
+
+/// Per-collection memory/storage breakdown, read from the REST
+/// `/collections/{name}/memory` endpoint - much more precise than the global
+/// jemalloc stats on `/telemetry`, and scoped to the collection under test.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct CollectionMemory {
+    pub total: MemoryUsage,
+    #[serde(default)]
+    pub vectors: Vec<VectorMemory>,
+    #[serde(default)]
+    pub sparse_vectors: Vec<VectorMemory>,
+    #[serde(default)]
+    pub payload: MemoryUsage,
+    #[serde(default)]
+    pub payload_index: Vec<PayloadIndexMemory>,
 }
 
 #[derive(Debug, Deserialize)]
-struct TelemetryResult {
-    memory: Option<TelemetryMemory>,
+struct CollectionMemoryResponse {
+    result: CollectionMemory,
 }
 
-#[derive(Debug, Deserialize)]
-struct TelemetryResponse {
-    result: TelemetryResult,
-}
-
-/// The gRPC client talks to port 6334; telemetry is only exposed over REST,
-/// on port 6333.
+/// The gRPC client talks to port 6334; this benchmark's REST calls (memory,
+/// telemetry) go through port 6333 instead.
 fn grpc_url_to_rest_url(qdrant_api_url: &str) -> String {
     qdrant_api_url.replace(":6334", ":6333")
 }
 
-/// Best-effort: telemetry is a diagnostic extra, so a REST-side failure (e.g.
-/// no REST access from this deployment) shouldn't fail the whole benchmark.
-async fn fetch_telemetry_memory(
+/// Best-effort: memory stats are a diagnostic extra, so a REST-side failure
+/// (e.g. no REST access from this deployment, or an older server without this
+/// endpoint) shouldn't fail the whole benchmark.
+async fn fetch_collection_memory(
     qdrant_api_url: &str,
     qdrant_api_key: Option<&str>,
-) -> Option<TelemetryMemory> {
+    collection_name: &str,
+) -> Option<CollectionMemory> {
     let rest_url = grpc_url_to_rest_url(qdrant_api_url);
-    let mut request = reqwest::Client::new().get(format!("{rest_url}/telemetry?details_level=3"));
+    let mut request =
+        reqwest::Client::new().get(format!("{rest_url}/collections/{collection_name}/memory"));
     if let Some(key) = qdrant_api_key {
         request = request.header("api-key", key);
     }
     let response = match request.send().await {
         Ok(response) => response,
         Err(err) => {
-            eprintln!("Warning: failed to fetch telemetry from {rest_url}: {err}");
+            eprintln!("Warning: failed to fetch collection memory from {rest_url}: {err}");
             return None;
         }
     };
-    match response.json::<TelemetryResponse>().await {
-        Ok(body) => body.result.memory,
+    match response.json::<CollectionMemoryResponse>().await {
+        Ok(body) => Some(body.result),
         Err(err) => {
-            eprintln!("Warning: failed to parse telemetry response from {rest_url}: {err}");
+            eprintln!("Warning: failed to parse collection memory response from {rest_url}: {err}");
             None
         }
     }
@@ -174,14 +202,14 @@ fn split_samples(samples: Vec<QuerySample>) -> (Vec<Duration>, HardwareUsageTota
     (durations, hardware_usage)
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct QueryPerformanceReport {
     pub latency: LatencyStats,
     pub hardware_usage: HardwareUsageTotals,
     pub collection_before: CollectionSnapshot,
     pub collection_after: CollectionSnapshot,
-    pub memory_before: Option<TelemetryMemory>,
-    pub memory_after: Option<TelemetryMemory>,
+    pub memory_before: Option<CollectionMemory>,
+    pub memory_after: Option<CollectionMemory>,
 }
 
 impl QueryPerformanceReport {
@@ -228,25 +256,54 @@ impl QueryPerformanceReport {
                 hw.vector_io_write,
             );
         }
-        match (self.memory_before, self.memory_after) {
+        match (&self.memory_before, &self.memory_after) {
             (Some(before), Some(after)) => {
                 println!(
-                    "server memory (jemalloc): resident {} -> {} bytes (delta {}), active {} -> {}, allocated {} -> {}, metadata {} -> {}, retained {} -> {}",
-                    before.resident_bytes,
-                    after.resident_bytes,
-                    after.resident_bytes as i64 - before.resident_bytes as i64,
-                    before.active_bytes,
-                    after.active_bytes,
-                    before.allocated_bytes,
-                    after.allocated_bytes,
-                    before.metadata_bytes,
-                    after.metadata_bytes,
-                    before.retained_bytes,
-                    after.retained_bytes,
+                    "collection memory total: disk {} -> {} bytes, ram {} -> {} bytes (delta {}), cached {} -> {} bytes, expected_cache {} -> {} bytes",
+                    before.total.disk_bytes,
+                    after.total.disk_bytes,
+                    before.total.ram_bytes,
+                    after.total.ram_bytes,
+                    after.total.ram_bytes as i64 - before.total.ram_bytes as i64,
+                    before.total.cached_bytes,
+                    after.total.cached_bytes,
+                    before.total.expected_cache_bytes,
+                    after.total.expected_cache_bytes,
                 );
+                for (kind, vectors) in [("vector", &after.vectors), ("sparse_vector", &after.sparse_vectors)] {
+                    for v in vectors {
+                        print!(
+                            "  {kind} '{}': storage(disk={} ram={} cached={}) index(disk={} ram={} cached={})",
+                            v.name,
+                            v.storage.disk_bytes,
+                            v.storage.ram_bytes,
+                            v.storage.cached_bytes,
+                            v.index.disk_bytes,
+                            v.index.ram_bytes,
+                            v.index.cached_bytes,
+                        );
+                        match &v.quantized {
+                            Some(q) => println!(
+                                " quantized(disk={} ram={} cached={})",
+                                q.disk_bytes, q.ram_bytes, q.cached_bytes
+                            ),
+                            None => println!(),
+                        }
+                    }
+                }
+                println!(
+                    "  payload: disk={} ram={} cached={}",
+                    after.payload.disk_bytes, after.payload.ram_bytes, after.payload.cached_bytes
+                );
+                for pi in &after.payload_index {
+                    println!(
+                        "  payload_index '{}': disk={} ram={} cached={}",
+                        pi.name, pi.usage.disk_bytes, pi.usage.ram_bytes, pi.usage.cached_bytes
+                    );
+                }
             }
             _ => println!(
-                "server memory: telemetry unavailable (no REST access, or memory not reported)"
+                "collection memory: endpoint unavailable (no REST access, or server predates this API)"
             ),
         }
     }
@@ -274,7 +331,7 @@ pub async fn query_performance(
     }
 
     let collection_before = snapshot_collection(&client, collection_name).await?;
-    let memory_before = fetch_telemetry_memory(qdrant_api_url, qdrant_api_key).await;
+    let memory_before = fetch_collection_memory(qdrant_api_url, qdrant_api_key, collection_name).await;
 
     let mut samples = Vec::with_capacity(embeddings.len());
     let wall_start = Instant::now();
@@ -304,7 +361,7 @@ pub async fn query_performance(
     let wall_clock = wall_start.elapsed();
 
     let collection_after = snapshot_collection(&client, collection_name).await?;
-    let memory_after = fetch_telemetry_memory(qdrant_api_url, qdrant_api_key).await;
+    let memory_after = fetch_collection_memory(qdrant_api_url, qdrant_api_key, collection_name).await;
 
     let (durations, hardware_usage) = split_samples(samples);
 
@@ -345,7 +402,7 @@ pub async fn query_performance_concurrent(
     }
 
     let collection_before = snapshot_collection(&client, collection_name).await?;
-    let memory_before = fetch_telemetry_memory(qdrant_api_url, qdrant_api_key).await;
+    let memory_before = fetch_collection_memory(qdrant_api_url, qdrant_api_key, collection_name).await;
 
     let client_ref = &client;
     let wall_start = Instant::now();
@@ -381,7 +438,7 @@ pub async fn query_performance_concurrent(
     let wall_clock = wall_start.elapsed();
 
     let collection_after = snapshot_collection(&client, collection_name).await?;
-    let memory_after = fetch_telemetry_memory(qdrant_api_url, qdrant_api_key).await;
+    let memory_after = fetch_collection_memory(qdrant_api_url, qdrant_api_key, collection_name).await;
 
     let (durations, hardware_usage) = split_samples(samples);
 

@@ -9,9 +9,11 @@ PARQUET_PREFIX="$HOME/.cache/huggingface/hub/datasets--CohereLabs--msmarco-v2.1-
 cargo run --bin collection-setup -- \
     $COLLECTION_NAME \
     --verbose \
-    --dense-vectors-memory cached \
-    --payload-memory cached \
-    --payload-index-memory cached \
+    --dense-vectors-memory cold \
+    --hnsw-memory cold \
+    --hnsw-inline-storage \
+    --quantize \
+    --quantized-vectors-memory pinned \
     --field-to-index doc_id=keyword \
     --field-to-index url=keyword \
     --field-to-index title=keyword \

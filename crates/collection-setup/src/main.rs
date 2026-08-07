@@ -34,8 +34,6 @@ struct CliArgs {
     mmap_threshold: Option<u64>,
     #[arg(long, default_value = None)]
     indexing_threshold: Option<u64>,
-    #[arg(long, default_value_t = false)]
-    io_uring: bool,
     #[arg(long)]
     field_to_index: Vec<String>,
     #[arg(long, default_value = None)]

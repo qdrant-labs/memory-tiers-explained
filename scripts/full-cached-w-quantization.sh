@@ -5,7 +5,6 @@ set -euo pipefail
 COLLECTION_NAME="memory_tiers_bench_collection"
 NUM_PARQUET_FILES="$1"
 PARQUET_PREFIX="$HOME/.cache/huggingface/hub/datasets--CohereLabs--msmarco-v2.1-embed-english-v3/snapshots/e78737fe92ac1b783211b705c12207ca75fcc9b7/passages_parquet"
-QUERIES_FILE="~/.cache/huggingface/hub/datasets--CohereLabs--msmarco-v2.1-embed-english-v3/snapshots/e78737fe92ac1b783211b705c12207ca75fcc9b7/queries_parquet/queries.parquet"
 
 cargo run --bin collection-setup -- \
     $COLLECTION_NAME \
@@ -31,3 +30,6 @@ do
         cargo run --bin benchmark -- upload $file $COLLECTION_NAME --verbose
     fi
 done
+
+./scripts/poll-for-green.sh $COLLECTION_NAME
+./scripts/delete-collection.sh $COLLECTION_NAME

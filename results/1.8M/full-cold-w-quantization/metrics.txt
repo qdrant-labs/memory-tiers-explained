@@ -1,0 +1,13 @@
+queries=1677 wall=78.047s qps=21.5 | latency min=11.165103ms p50=33.740917ms p95=42.636378ms p99=50.801036ms max=8.954763956s mean=46.505002ms
+collection segments: 7 -> 7
+collection points: Some(1760180) -> Some(1760180)
+collection indexed_vectors: Some(1760180) -> Some(1760180)
+hardware usage (summed over 1677 queries): cpu=38467497984 payload_io_read=0 payload_io_write=0 payload_index_io_read=0 payload_index_io_write=0 vector_io_read=10343736 vector_io_write=0
+collection memory total: disk 172882203432 -> 172882203432 bytes, ram 74016744 -> 74016744 bytes (delta 0), cached 15878937984 -> 24554830128 bytes, expected_cache 162286129996 -> 162286129996 bytes
+  vector 'dense': storage(disk=7210966067 ram=0 cached=220080) index(disk=162286129996 ram=0 cached=24554430464) quantized(disk=1809466987 ram=0 cached=24576)
+  payload: disk=644419742 ram=0 cached=155008
+  payload_index 'url': disk=190479724 ram=466144 cached=0
+  payload_index 'doc_id': disk=236338479 ram=466144 cached=0
+  payload_index 'end_char': disk=142593664 ram=768536 cached=0
+  payload_index 'title': disk=167968081 ram=466144 cached=0
+  payload_index 'start_char': disk=142575392 ram=782480 cached=0

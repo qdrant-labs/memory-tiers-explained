@@ -7,9 +7,8 @@ use qdrant_client::{
         IntegerIndexParamsBuilder, KeywordIndexParamsBuilder, Memory, OptimizersConfigDiffBuilder,
         PayloadStorageParamsBuilder, QuantizationType, ScalarQuantizationBuilder,
         SparseIndexConfigBuilder, SparseVectorConfig, SparseVectorParamsBuilder,
-        SparseVectorsConfigBuilder, TextIndexParamsBuilder, TokenizerType, TurboQuantBitSize,
-        TurboQuantizationBuilder, UuidIndexParamsBuilder, VectorParamsBuilder, VectorsConfig,
-        VectorsConfigBuilder,
+        SparseVectorsConfigBuilder, TextIndexParamsBuilder, TokenizerType, UuidIndexParamsBuilder,
+        VectorParamsBuilder, VectorsConfig, VectorsConfigBuilder,
     },
 };
 use std::{
@@ -221,7 +220,7 @@ impl CollectionSetupWiz {
             if let Some(qt) = memory_tiers_setup.quantization {
                 if qt.quantized {
                     let mut quant_builder =
-                        TurboQuantizationBuilder::default().bits(TurboQuantBitSize::Bits4);
+                        ScalarQuantizationBuilder::default().r#type(QuantizationType::Int8.into());
                     if let Some(mem) = qt.memory_tier {
                         quant_builder = quant_builder.memory(mem.into_memory());
                     }
