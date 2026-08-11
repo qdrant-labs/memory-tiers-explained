@@ -20,6 +20,8 @@ struct CliArgs {
     hnsw_memory: Option<String>,
     #[arg(long, default_value_t = false)]
     quantize: bool,
+    #[arg(long, default_value_t = false)]
+    use_turboquant: bool,
     #[arg(long, default_value = None)]
     quantized_vectors_memory: Option<String>,
     #[arg(long, default_value = None)]
@@ -75,6 +77,7 @@ async fn main() -> Result<(), SetupError> {
             }
         },
         quantized: args.quantize,
+        use_turboquant: args.use_turboquant,
     };
     let setup = MemoryTiersSetup {
         hnsw_config: Some(hnsw_config),

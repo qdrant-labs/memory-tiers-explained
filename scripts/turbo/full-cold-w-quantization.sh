@@ -12,6 +12,10 @@ cargo run --bin collection-setup -- \
     --dense-vectors-memory cold \
     --payload-memory cold \
     --payload-index-memory cold \
+    --hnsw-inline-storage \
+    --quantize \
+    --quantized-vectors-memory cold \
+    --use-turbo \
     --field-to-index doc_id=keyword \
     --field-to-index url=keyword \
     --field-to-index title=keyword \

@@ -7,8 +7,9 @@ use qdrant_client::{
         IntegerIndexParamsBuilder, KeywordIndexParamsBuilder, Memory, OptimizersConfigDiffBuilder,
         PayloadStorageParamsBuilder, QuantizationType, ScalarQuantizationBuilder,
         SparseIndexConfigBuilder, SparseVectorConfig, SparseVectorParamsBuilder,
-        SparseVectorsConfigBuilder, TextIndexParamsBuilder, TokenizerType, UuidIndexParamsBuilder,
-        VectorParamsBuilder, VectorsConfig, VectorsConfigBuilder,
+        SparseVectorsConfigBuilder, TextIndexParamsBuilder, TokenizerType, TurboQuantBitSize,
+        TurboQuantizationBuilder, UuidIndexParamsBuilder, VectorParamsBuilder, VectorsConfig,
+        VectorsConfigBuilder,
     },
 };
 use std::{
@@ -118,6 +119,7 @@ pub struct HnswTierConfig {
 pub struct QuantizationTierConfig {
     pub memory_tier: Option<MemoryTier>,
     pub quantized: bool,
+    pub use_turboquant: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -201,7 +203,14 @@ impl CollectionSetupWiz {
             let mut vectors_builder =
                 VectorParamsBuilder::new(1024, Distance::Cosine).memory(dv.into_memory());
             if let Some(qt) = memory_tiers_setup.quantization {
-                if qt.quantized {
+                if qt.quantized && qt.use_turboquant {
+                    let mut quant_builder =
+                        TurboQuantizationBuilder::default().bits(TurboQuantBitSize::Bits4);
+                    if let Some(mem) = qt.memory_tier {
+                        quant_builder = quant_builder.memory(mem.into_memory());
+                    }
+                    vectors_builder = vectors_builder.quantization_config(quant_builder.build())
+                } else if qt.quantized && !qt.use_turboquant {
                     let mut quant_builder =
                         ScalarQuantizationBuilder::default().r#type(QuantizationType::Int8.into());
                     if let Some(mem) = qt.memory_tier {
@@ -218,7 +227,14 @@ impl CollectionSetupWiz {
         } else {
             let mut vectors_builder = VectorParamsBuilder::new(1024, Distance::Cosine);
             if let Some(qt) = memory_tiers_setup.quantization {
-                if qt.quantized {
+                if qt.quantized && qt.use_turboquant {
+                    let mut quant_builder =
+                        TurboQuantizationBuilder::default().bits(TurboQuantBitSize::Bits4);
+                    if let Some(mem) = qt.memory_tier {
+                        quant_builder = quant_builder.memory(mem.into_memory());
+                    }
+                    vectors_builder = vectors_builder.quantization_config(quant_builder.build())
+                } else if qt.quantized && !qt.use_turboquant {
                     let mut quant_builder =
                         ScalarQuantizationBuilder::default().r#type(QuantizationType::Int8.into());
                     if let Some(mem) = qt.memory_tier {

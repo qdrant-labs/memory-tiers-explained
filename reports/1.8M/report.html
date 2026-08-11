@@ -1,0 +1,628 @@
+<title>Qdrant Memory Tiers — 1.8M Passage Benchmark</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --page-plane: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --gridline: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --critical: #d03b3b;
+    --critical-bg: #fbeceb;
+    --c1: #2a78d6; /* Cached */
+    --c2: #eb6834; /* Cached + SQ */
+    --c3: #1baf7a; /* Cold */
+    --c4: #eda100; /* Cold + SQ */
+    --c5: #e87ba4; /* HS-Rec (pinned SQ) */
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --surface-1: #1a1a19;
+      --page-plane: #0d0d0d;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --gridline: #2c2c2a;
+      --baseline: #383835;
+      --border: rgba(255,255,255,0.10);
+      --critical: #e66767;
+      --critical-bg: #2a1616;
+      --c1: #3987e5;
+      --c2: #d95926;
+      --c3: #199e70;
+      --c4: #c98500;
+      --c5: #d55181;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page-plane);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 40px 24px 80px; }
+  header h1 { font-size: 26px; margin: 0 0 6px; }
+  header p.sub { color: var(--text-secondary); margin: 0 0 4px; font-size: 15px; }
+  header p.meta { color: var(--text-muted); margin: 0; font-size: 13px; }
+  h2 { font-size: 18px; margin: 48px 0 6px; }
+  h3 { font-size: 15px; margin: 28px 0 10px; color: var(--text-primary); }
+  section > p.lede { color: var(--text-secondary); margin: 0 0 20px; max-width: 760px; font-size: 14px; }
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+
+  /* KPI tiles */
+  .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 16px; }
+  .kpi { padding: 16px 18px; }
+  .kpi .label { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
+  .kpi .value { font-size: 26px; font-weight: 600; }
+  .kpi .foot { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+  .kpi .swatch { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:6px; vertical-align:1px; }
+
+  /* legend */
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; margin: 14px 0 20px; font-size: 13px; color: var(--text-secondary); }
+  .legend .item { display: flex; align-items: center; gap: 6px; }
+  .legend .swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+
+  /* config table */
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  table.card { overflow: hidden; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--gridline); }
+  thead th { color: var(--text-secondary); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: .02em; border-bottom: 1px solid var(--baseline); }
+  tbody tr:last-child td { border-bottom: none; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td .dot { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:7px; vertical-align:1px; }
+  .table-scroll { overflow-x: auto; }
+  .table-scroll table { min-width: 760px; }
+
+  /* charts */
+  .chart-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-top: 16px; }
+  .chart-card { padding: 16px 18px 8px; }
+  .chart-card h4 { font-size: 13.5px; margin: 0 0 2px; font-weight: 600; }
+  .chart-card .chart-note { font-size: 12px; color: var(--text-muted); margin: 0 0 10px; }
+  svg.chart { width: 100%; height: auto; display: block; overflow: visible; }
+  .bar { cursor: pointer; }
+  .bar-group:hover .bar { filter: brightness(1.08); }
+  .bar-label { font-size: 11px; fill: var(--text-secondary); text-anchor: middle; font-variant-numeric: tabular-nums; }
+  .cat-label { font-size: 11px; fill: var(--text-muted); text-anchor: middle; }
+  .tick-label { font-size: 10.5px; fill: var(--text-muted); text-anchor: end; font-variant-numeric: tabular-nums; }
+  .grid-line { stroke: var(--gridline); stroke-width: 1; }
+  .axis-line { stroke: var(--baseline); stroke-width: 1; }
+
+  /* tooltip */
+  #tooltip {
+    position: fixed; pointer-events: none; z-index: 50;
+    background: var(--text-primary); color: var(--surface-1);
+    font-size: 12.5px; padding: 7px 10px; border-radius: 6px;
+    opacity: 0; transform: translate(-50%, -100%); transition: opacity .08s;
+    white-space: nowrap;
+  }
+  #tooltip strong { font-variant-numeric: tabular-nums; }
+  #tooltip .name { display:block; color: var(--text-secondary); font-size: 11px; margin-top: 2px; }
+
+  /* callout */
+  .callout { padding: 16px 18px; margin: 16px 0; border-radius: 10px; border: 1px solid var(--critical); background: var(--critical-bg); }
+  .callout .head { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--critical); font-size: 14px; margin-bottom: 6px; }
+  .callout p { margin: 6px 0; font-size: 13.5px; color: var(--text-primary); }
+  .callout p.muted { color: var(--text-secondary); }
+
+  ul.takeaways { padding-left: 20px; margin: 10px 0; }
+  ul.takeaways li { margin-bottom: 10px; font-size: 14px; }
+  ul.takeaways li strong { font-weight: 600; }
+
+  footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--gridline); color: var(--text-muted); font-size: 12px; }
+
+  @media (max-width: 760px) {
+    .kpi-row { grid-template-columns: repeat(2, 1fr); }
+    .chart-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Qdrant Memory Tiers — 1.8M Passage Benchmark</h1>
+    <p class="sub">Local single-node baseline across 5 memory-tier presets, ahead of the cloud-cluster run at higher scale.</p>
+    <p class="meta">MS MARCO v2.1 passage embeddings (Cohere) &middot; 1,760,180 points &middot; 1,677-query sequential search benchmark &middot; captured in <code>results/1.8M/</code></p>
+  </header>
+
+  <div class="kpi-row">
+    <div class="kpi card">
+      <div class="label">Dataset size</div>
+      <div class="value">1.76M</div>
+      <div class="foot">points uploaded per preset, 215 batches each</div>
+    </div>
+    <div class="kpi card">
+      <div class="label">Presets compared</div>
+      <div class="value">5</div>
+      <div class="foot">cached, cold, and quantized variants</div>
+    </div>
+    <div class="kpi card">
+      <div class="label">Fastest search</div>
+      <div class="value"><span class="swatch" style="background:var(--c2)"></span>99.2 qps</div>
+      <div class="foot">Cached + quantization</div>
+    </div>
+    <div class="kpi card">
+      <div class="label">Widest tail-latency gap</div>
+      <div class="value" style="color:var(--critical)">~2,000×</div>
+      <div class="foot">Cold max (30.5s) vs. Cached max (15.6ms)</div>
+    </div>
+  </div>
+
+  <section>
+    <h2>Presets under test</h2>
+    <p class="lede">Each preset is created via <code>collection-setup</code> with a different per-component memory-tier layout, then loaded with the full 1.76M-point dataset and hit with the same sequential search benchmark. Colors below are used consistently across every chart in this report.</p>
+
+    <div class="legend">
+      <span class="item"><span class="swatch" style="background:var(--c1)"></span>Cached — dense vectors, HNSW, payload &amp; payload index all in the page cache</span>
+      <span class="item"><span class="swatch" style="background:var(--c2)"></span>Cached + SQ — same as Cached, plus scalar-quantized vectors (also cached)</span>
+      <span class="item"><span class="swatch" style="background:var(--c3)"></span>Cold — dense vectors, inline HNSW, payload &amp; payload index all on the cold tier</span>
+      <span class="item"><span class="swatch" style="background:var(--c4)"></span>Cold + SQ — same as Cold, plus scalar-quantized vectors (also cold)</span>
+      <span class="item"><span class="swatch" style="background:var(--c5)"></span>HS-Rec — dense vectors &amp; inline HNSW cold, quantized vectors <strong>pinned in RAM</strong>, no payload</span>
+    </div>
+
+    <div class="table-scroll">
+      <table class="card">
+        <thead>
+          <tr><th>Preset</th><th>Dense vectors</th><th>HNSW</th><th>Quantization</th><th>Payload</th><th>Payload index</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><span class="dot" style="background:var(--c1)"></span>Cached</td><td>Cached</td><td>default (not inline)</td><td>—</td><td>Cached</td><td>Cached</td></tr>
+          <tr><td><span class="dot" style="background:var(--c2)"></span>Cached + SQ</td><td>Cached</td><td>default (not inline)</td><td>Cached, scalar int8</td><td>Cached</td><td>Cached</td></tr>
+          <tr><td><span class="dot" style="background:var(--c3)"></span>Cold</td><td>Cold</td><td>inline storage</td><td>—</td><td>Cold</td><td>Cold</td></tr>
+          <tr><td><span class="dot" style="background:var(--c4)"></span>Cold + SQ</td><td>Cold</td><td>inline storage</td><td>Cold, scalar int8</td><td>Cold</td><td>Cold</td></tr>
+          <tr><td><span class="dot" style="background:var(--c5)"></span>HS-Rec</td><td>Cold</td><td>inline storage, Cold tier</td><td><strong>Pinned</strong>, scalar int8</td><td>none</td><td>none</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Search performance</h2>
+    <p class="lede">All five collections were queried with the same 1,677 sequential queries immediately after upload — so the "cold" presets are measured from a cold page cache, not after a warm-up period. Keep that framing in mind: it's the realistic worst case for a freshly-restored cold-tier collection, not necessarily its long-run steady state.</p>
+
+    <div class="chart-grid">
+      <div class="chart-card card">
+        <h4>Search throughput</h4>
+        <p class="chart-note">queries per second, higher is better</p>
+        <svg class="chart" viewBox="0 0 680 250" role="img" aria-label="Search throughput in queries per second by preset">
+          <line class="grid-line" x1="46" y1="26" x2="670" y2="26"></line>
+          <line class="grid-line" x1="46" y1="73.5" x2="670" y2="73.5"></line>
+          <line class="grid-line" x1="46" y1="121" x2="670" y2="121"></line>
+          <line class="grid-line" x1="46" y1="168.5" x2="670" y2="168.5"></line>
+          <text class="tick-label" x="40" y="29">100</text>
+          <text class="tick-label" x="40" y="76.5">75</text>
+          <text class="tick-label" x="40" y="124">50</text>
+          <text class="tick-label" x="40" y="171.5">25</text>
+          <text class="tick-label" x="40" y="219">0</text>
+          <line class="axis-line" x1="46" y1="216" x2="670" y2="216"></line>
+
+          <g class="bar-group" data-name="Cached" data-value="94.3 qps">
+            <rect class="bar" x="84.4" y="36.8" width="48" height="179.2" rx="4" ry="4" fill="var(--c1)"></rect>
+            <rect x="84.4" y="211.2" width="48" height="4.8" fill="var(--c1)"></rect>
+            <text class="bar-label" x="108.4" y="30.8">94.3</text>
+            <text class="cat-label" x="108.4" y="232">Cached</text>
+          </g>
+          <g class="bar-group" data-name="Cached + SQ" data-value="99.2 qps">
+            <rect class="bar" x="209.2" y="27.5" width="48" height="188.5" rx="4" ry="4" fill="var(--c2)"></rect>
+            <rect x="209.2" y="211.5" width="48" height="4.5" fill="var(--c2)"></rect>
+            <text class="bar-label" x="233.2" y="21.5">99.2</text>
+            <text class="cat-label" x="233.2" y="232">Cached + SQ</text>
+          </g>
+          <g class="bar-group" data-name="Cold" data-value="5.4 qps">
+            <rect class="bar" x="334" y="205.7" width="48" height="10.3" rx="4" ry="4" fill="var(--c3)"></rect>
+            <text class="bar-label" x="358" y="199.7">5.4</text>
+            <text class="cat-label" x="358" y="232">Cold</text>
+          </g>
+          <g class="bar-group" data-name="Cold + SQ" data-value="21.5 qps">
+            <rect class="bar" x="458.8" y="175.2" width="48" height="40.9" rx="4" ry="4" fill="var(--c4)"></rect>
+            <rect x="458.8" y="211.2" width="48" height="4.9" fill="var(--c4)"></rect>
+            <text class="bar-label" x="482.8" y="169.2">21.5</text>
+            <text class="cat-label" x="482.8" y="232">Cold + SQ</text>
+          </g>
+          <g class="bar-group" data-name="HS-Rec" data-value="37.6 qps">
+            <rect class="bar" x="583.6" y="144.6" width="48" height="71.4" rx="4" ry="4" fill="var(--c5)"></rect>
+            <rect x="583.6" y="211.4" width="48" height="4.6" fill="var(--c5)"></rect>
+            <text class="bar-label" x="607.6" y="138.6">37.6</text>
+            <text class="cat-label" x="607.6" y="232">HS-Rec</text>
+          </g>
+        </svg>
+      </div>
+
+      <div class="chart-card card">
+        <h4>Median latency (p50)</h4>
+        <p class="chart-note">milliseconds, lower is better</p>
+        <svg class="chart" viewBox="0 0 680 250" role="img" aria-label="Median search latency in milliseconds by preset">
+          <line class="grid-line" x1="46" y1="26" x2="670" y2="26"></line>
+          <line class="grid-line" x1="46" y1="73.5" x2="670" y2="73.5"></line>
+          <line class="grid-line" x1="46" y1="121" x2="670" y2="121"></line>
+          <line class="grid-line" x1="46" y1="168.5" x2="670" y2="168.5"></line>
+          <text class="tick-label" x="40" y="29">40</text>
+          <text class="tick-label" x="40" y="76.5">30</text>
+          <text class="tick-label" x="40" y="124">20</text>
+          <text class="tick-label" x="40" y="171.5">10</text>
+          <text class="tick-label" x="40" y="219">0</text>
+          <line class="axis-line" x1="46" y1="216" x2="670" y2="216"></line>
+
+          <g class="bar-group" data-name="Cached" data-value="10.73 ms">
+            <rect class="bar" x="84.4" y="165" width="48" height="51" rx="4" ry="4" fill="var(--c1)"></rect>
+            <rect x="84.4" y="211" width="48" height="5" fill="var(--c1)"></rect>
+            <text class="bar-label" x="108.4" y="159">10.7</text>
+            <text class="cat-label" x="108.4" y="232">Cached</text>
+          </g>
+          <g class="bar-group" data-name="Cached + SQ" data-value="6.66 ms">
+            <rect class="bar" x="209.2" y="184.4" width="48" height="31.6" rx="4" ry="4" fill="var(--c2)"></rect>
+            <rect x="209.2" y="211.6" width="48" height="4.4" fill="var(--c2)"></rect>
+            <text class="bar-label" x="233.2" y="178.4">6.7</text>
+            <text class="cat-label" x="233.2" y="232">Cached + SQ</text>
+          </g>
+          <g class="bar-group" data-name="Cold" data-value="11.33 ms">
+            <rect class="bar" x="334" y="162.2" width="48" height="53.8" rx="4" ry="4" fill="var(--c3)"></rect>
+            <rect x="334" y="211" width="48" height="5" fill="var(--c3)"></rect>
+            <text class="bar-label" x="358" y="156.2">11.3</text>
+            <text class="cat-label" x="358" y="232">Cold</text>
+          </g>
+          <g class="bar-group" data-name="Cold + SQ" data-value="33.74 ms">
+            <rect class="bar" x="458.8" y="55.7" width="48" height="160.3" rx="4" ry="4" fill="var(--c4)"></rect>
+            <rect x="458.8" y="211" width="48" height="5" fill="var(--c4)"></rect>
+            <text class="bar-label" x="482.8" y="49.7">33.7</text>
+            <text class="cat-label" x="482.8" y="232">Cold + SQ</text>
+          </g>
+          <g class="bar-group" data-name="HS-Rec" data-value="26.64 ms">
+            <rect class="bar" x="583.6" y="89.5" width="48" height="126.5" rx="4" ry="4" fill="var(--c5)"></rect>
+            <rect x="583.6" y="211" width="48" height="5" fill="var(--c5)"></rect>
+            <text class="bar-label" x="607.6" y="83.5">26.6</text>
+            <text class="cat-label" x="607.6" y="232">HS-Rec</text>
+          </g>
+        </svg>
+      </div>
+
+      <div class="chart-card card">
+        <h4>p99 latency <span style="color:var(--text-muted); font-weight:400;">(log scale)</span></h4>
+        <p class="chart-note">milliseconds &middot; log axis because values span 1–2 orders of magnitude</p>
+        <svg class="chart" viewBox="0 0 680 250" role="img" aria-label="p99 search latency in milliseconds by preset, log scale">
+          <line class="grid-line" x1="46" y1="26" x2="670" y2="26"></line>
+          <line class="grid-line" x1="46" y1="89.3" x2="670" y2="89.3"></line>
+          <line class="grid-line" x1="46" y1="152.7" x2="670" y2="152.7"></line>
+          <text class="tick-label" x="40" y="29">1000</text>
+          <text class="tick-label" x="40" y="92.3">100</text>
+          <text class="tick-label" x="40" y="155.7">10</text>
+          <text class="tick-label" x="40" y="219">1</text>
+          <line class="axis-line" x1="46" y1="216" x2="670" y2="216"></line>
+
+          <g class="bar-group" data-name="Cached" data-value="13.14 ms">
+            <rect class="bar" x="84.4" y="145.2" width="48" height="70.8" rx="4" ry="4" fill="var(--c1)"></rect>
+            <rect x="84.4" y="211.8" width="48" height="4.2" fill="var(--c1)"></rect>
+            <text class="bar-label" x="108.4" y="139.2">13.1</text>
+            <text class="cat-label" x="108.4" y="232">Cached</text>
+          </g>
+          <g class="bar-group" data-name="Cached + SQ" data-value="121.83 ms">
+            <rect class="bar" x="209.2" y="83.9" width="48" height="132.1" rx="4" ry="4" fill="var(--c2)"></rect>
+            <rect x="209.2" y="211.8" width="48" height="4.2" fill="var(--c2)"></rect>
+            <text class="bar-label" x="233.2" y="77.9">121.8</text>
+            <text class="cat-label" x="233.2" y="232">Cached + SQ</text>
+          </g>
+          <g class="bar-group" data-name="Cold" data-value="582.47 ms">
+            <rect class="bar" x="334" y="40.9" width="48" height="175.1" rx="4" ry="4" fill="var(--c3)"></rect>
+            <rect x="334" y="211.6" width="48" height="4.4" fill="var(--c3)"></rect>
+            <text class="bar-label" x="358" y="34.9">582.5</text>
+            <text class="cat-label" x="358" y="232">Cold</text>
+          </g>
+          <g class="bar-group" data-name="Cold + SQ" data-value="50.80 ms">
+            <rect class="bar" x="458.8" y="108" width="48" height="108" rx="4" ry="4" fill="var(--c4)"></rect>
+            <rect x="458.8" y="211.6" width="48" height="4.4" fill="var(--c4)"></rect>
+            <text class="bar-label" x="482.8" y="102">50.8</text>
+            <text class="cat-label" x="482.8" y="232">Cold + SQ</text>
+          </g>
+          <g class="bar-group" data-name="HS-Rec" data-value="38.04 ms">
+            <rect class="bar" x="583.6" y="115.9" width="48" height="100.1" rx="4" ry="4" fill="var(--c5)"></rect>
+            <rect x="583.6" y="211.6" width="48" height="4.4" fill="var(--c5)"></rect>
+            <text class="bar-label" x="607.6" y="109.9">38.0</text>
+            <text class="cat-label" x="607.6" y="232">HS-Rec</text>
+          </g>
+        </svg>
+      </div>
+
+      <div class="chart-card card">
+        <h4>Max latency observed <span style="color:var(--text-muted); font-weight:400;">(log scale)</span></h4>
+        <p class="chart-note">milliseconds &middot; single worst query per preset — the actual reader-facing worst case</p>
+        <svg class="chart" viewBox="0 0 680 250" role="img" aria-label="Maximum search latency in milliseconds by preset, log scale">
+          <line class="grid-line" x1="46" y1="26" x2="670" y2="26"></line>
+          <line class="grid-line" x1="46" y1="64" x2="670" y2="64"></line>
+          <line class="grid-line" x1="46" y1="102" x2="670" y2="102"></line>
+          <line class="grid-line" x1="46" y1="140" x2="670" y2="140"></line>
+          <line class="grid-line" x1="46" y1="178" x2="670" y2="178"></line>
+          <text class="tick-label" x="40" y="29">100000</text>
+          <text class="tick-label" x="40" y="67">10000</text>
+          <text class="tick-label" x="40" y="105">1000</text>
+          <text class="tick-label" x="40" y="143">100</text>
+          <text class="tick-label" x="40" y="181">10</text>
+          <text class="tick-label" x="40" y="219">1</text>
+          <line class="axis-line" x1="46" y1="216" x2="670" y2="216"></line>
+
+          <g class="bar-group" data-name="Cached" data-value="15.59 ms">
+            <rect class="bar" x="84.4" y="170.7" width="48" height="45.3" rx="4" ry="4" fill="var(--c1)"></rect>
+            <rect x="84.4" y="211.3" width="48" height="4.7" fill="var(--c1)"></rect>
+            <text class="bar-label" x="108.4" y="164.7">15.6</text>
+            <text class="cat-label" x="108.4" y="232">Cached</text>
+          </g>
+          <g class="bar-group" data-name="Cached + SQ" data-value="316.77 ms">
+            <rect class="bar" x="209.2" y="121" width="48" height="95" rx="4" ry="4" fill="var(--c2)"></rect>
+            <rect x="209.2" y="211" width="48" height="5" fill="var(--c2)"></rect>
+            <text class="bar-label" x="233.2" y="115">316.8</text>
+            <text class="cat-label" x="233.2" y="232">Cached + SQ</text>
+          </g>
+          <g class="bar-group" data-name="Cold" data-value="30,542.93 ms (30.5s)">
+            <rect class="bar" x="334" y="45.6" width="48" height="170.4" rx="4" ry="4" fill="var(--c3)"></rect>
+            <rect x="334" y="211" width="48" height="5" fill="var(--c3)"></rect>
+            <text class="bar-label" x="358" y="39.6">30.5s</text>
+            <text class="cat-label" x="358" y="232">Cold</text>
+          </g>
+          <g class="bar-group" data-name="Cold + SQ" data-value="8,954.76 ms (9.0s)">
+            <rect class="bar" x="458.8" y="65.8" width="48" height="150.2" rx="4" ry="4" fill="var(--c4)"></rect>
+            <rect x="458.8" y="211" width="48" height="5" fill="var(--c4)"></rect>
+            <text class="bar-label" x="482.8" y="59.8">9.0s</text>
+            <text class="cat-label" x="482.8" y="232">Cold + SQ</text>
+          </g>
+          <g class="bar-group" data-name="HS-Rec" data-value="68.07 ms">
+            <rect class="bar" x="583.6" y="146.3" width="48" height="69.7" rx="4" ry="4" fill="var(--c5)"></rect>
+            <rect x="583.6" y="211" width="48" height="5" fill="var(--c5)"></rect>
+            <text class="bar-label" x="607.6" y="140.3">68.1</text>
+            <text class="cat-label" x="607.6" y="232">HS-Rec</text>
+          </g>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Upload performance</h2>
+    <p class="lede">Same 1,760,180 points, same 215 batches, uploaded into each empty collection before the memory tier had any working set to warm.</p>
+    <div class="chart-grid">
+      <div class="chart-card card">
+        <h4>Total upload time</h4>
+        <p class="chart-note">seconds for all 215 batches, lower is better</p>
+        <svg class="chart" viewBox="0 0 680 250" role="img" aria-label="Total upload time in seconds by preset">
+          <line class="grid-line" x1="46" y1="26" x2="670" y2="26"></line>
+          <line class="grid-line" x1="46" y1="73.5" x2="670" y2="73.5"></line>
+          <line class="grid-line" x1="46" y1="121" x2="670" y2="121"></line>
+          <line class="grid-line" x1="46" y1="168.5" x2="670" y2="168.5"></line>
+          <text class="tick-label" x="40" y="29">1200</text>
+          <text class="tick-label" x="40" y="76.5">900</text>
+          <text class="tick-label" x="40" y="124">600</text>
+          <text class="tick-label" x="40" y="171.5">300</text>
+          <text class="tick-label" x="40" y="219">0</text>
+          <line class="axis-line" x1="46" y1="216" x2="670" y2="216"></line>
+
+          <g class="bar-group" data-name="Cached" data-value="816.6s">
+            <rect class="bar" x="84.4" y="86.7" width="48" height="129.3" rx="4" ry="4" fill="var(--c1)"></rect>
+            <rect x="84.4" y="211" width="48" height="5" fill="var(--c1)"></rect>
+            <text class="bar-label" x="108.4" y="80.7">816.6</text>
+            <text class="cat-label" x="108.4" y="232">Cached</text>
+          </g>
+          <g class="bar-group" data-name="Cached + SQ" data-value="729.2s">
+            <rect class="bar" x="209.2" y="100.5" width="48" height="115.5" rx="4" ry="4" fill="var(--c2)"></rect>
+            <rect x="209.2" y="211" width="48" height="5" fill="var(--c2)"></rect>
+            <text class="bar-label" x="233.2" y="94.5">729.2</text>
+            <text class="cat-label" x="233.2" y="232">Cached + SQ</text>
+          </g>
+          <g class="bar-group" data-name="Cold" data-value="778.7s">
+            <rect class="bar" x="334" y="92.7" width="48" height="123.3" rx="4" ry="4" fill="var(--c3)"></rect>
+            <rect x="334" y="211" width="48" height="5" fill="var(--c3)"></rect>
+            <text class="bar-label" x="358" y="86.7">778.7</text>
+            <text class="cat-label" x="358" y="232">Cold</text>
+          </g>
+          <g class="bar-group" data-name="Cold + SQ" data-value="798.5s">
+            <rect class="bar" x="458.8" y="89.6" width="48" height="126.4" rx="4" ry="4" fill="var(--c4)"></rect>
+            <rect x="458.8" y="211" width="48" height="5" fill="var(--c4)"></rect>
+            <text class="bar-label" x="482.8" y="83.6">798.5</text>
+            <text class="cat-label" x="482.8" y="232">Cold + SQ</text>
+          </g>
+          <g class="bar-group" data-name="HS-Rec" data-value="1,096.0s">
+            <rect class="bar" x="583.6" y="42.5" width="48" height="173.5" rx="4" ry="4" fill="var(--c5)"></rect>
+            <rect x="583.6" y="211" width="48" height="5" fill="var(--c5)"></rect>
+            <text class="bar-label" x="607.6" y="36.5">1096.0</text>
+            <text class="cat-label" x="607.6" y="232">HS-Rec</text>
+          </g>
+        </svg>
+      </div>
+
+      <div class="chart-card card" style="display:flex; flex-direction:column; justify-content:center;">
+        <h4>Reading the upload numbers</h4>
+        <p style="font-size:13.5px; color:var(--text-secondary); margin-top:8px;">
+          Upload throughput is flat across presets (~0.2–0.3 batches/s) — the memory tier of the
+          <em>target</em> collection barely moves total upload time, since ingestion is bottlenecked
+          on write/indexing, not on where data ends up living for reads.
+        </p>
+        <p style="font-size:13.5px; color:var(--text-secondary);">
+          HS-Rec is the outlier: ~34% slower to upload than Cached (1,096.0s vs. 816.6s). It's the only
+          preset combining <strong>Cold HNSW + pinned quantization</strong> — building and pinning the
+          quantized index while the HNSW graph is cold appears to add real cost during ingestion, which
+          is worth re-confirming at cloud scale since it directly affects re-index / restore time.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Disk footprint anomaly — flag before scaling up</h2>
+    <div class="callout">
+      <div class="head">&#9888; HNSW inline storage + quantization inflates on-disk graph size ~470×</div>
+      <p>
+        In the two presets that combine <strong>inline HNSW storage</strong> with <strong>quantization</strong>
+        (Cold + SQ, HS-Rec), the HNSW graph's on-disk footprint jumps to <strong>~162GB and ~161GB</strong>
+        respectively — versus <strong>~346–347MB</strong> in every other preset, including plain <em>Cold</em>
+        (inline storage alone, no quantization). Total collection disk usage follows suit: ~172GB and ~172GB
+        vs. ~9–11GB elsewhere, for the <em>same</em> 1.76M points.
+      </p>
+      <p class="muted">
+        Inline storage by itself (Cold, no quantization) does not cause this — its index disk size is normal
+        (~346MB), matching Cached. The blow-up only appears when inline storage and quantization are combined,
+        so it looks like a real interaction effect between the two settings rather than a property of either
+        alone. <code>collection-setup</code>'s source doesn't document this combination, so treat it as
+        unverified until checked against Qdrant's own behavior.
+      </p>
+      <p>
+        <strong>Before running this at cloud scale:</strong> confirm whether this is expected Qdrant behavior for
+        <code>inline_storage + quantized</code> collections (vs. a preallocation artifact that doesn't reflect
+        real usage) — at 10–100× the point count, a 470× disk multiplier turns a modest dataset into a
+        provisioning problem, and could make disk the actual bottleneck rather than search latency.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Full results</h2>
+    <p class="lede">Raw numbers behind every chart above, plus disk/cache figures not otherwise charted. Search latency percentiles are per-query milliseconds over 1,677 sequential queries.</p>
+    <div class="table-scroll">
+      <table class="card">
+        <thead>
+          <tr>
+            <th>Preset</th>
+            <th class="num">Upload (s)</th>
+            <th class="num">QPS</th>
+            <th class="num">p50 (ms)</th>
+            <th class="num">p95 (ms)</th>
+            <th class="num">p99 (ms)</th>
+            <th class="num">Max (ms)</th>
+            <th class="num">Mean (ms)</th>
+            <th class="num">Disk (GB)</th>
+            <th class="num">Cache end (GB)</th>
+            <th class="num">Vector IO read (GB)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="dot" style="background:var(--c1)"></span>Cached</td>
+            <td class="num">816.6</td><td class="num">94.3</td><td class="num">10.7</td><td class="num">12.4</td>
+            <td class="num">13.1</td><td class="num">15.6</td><td class="num">10.6</td>
+            <td class="num">9.2</td><td class="num">9.1</td><td class="num">0.0</td>
+          </tr>
+          <tr>
+            <td><span class="dot" style="background:var(--c2)"></span>Cached + SQ</td>
+            <td class="num">729.2</td><td class="num">99.2</td><td class="num">6.7</td><td class="num">13.2</td>
+            <td class="num">121.8</td><td class="num">316.8</td><td class="num">10.0</td>
+            <td class="num">10.9</td><td class="num">9.5</td><td class="num">31.9</td>
+          </tr>
+          <tr>
+            <td><span class="dot" style="background:var(--c3)"></span>Cold</td>
+            <td class="num">778.7</td><td class="num">5.4</td><td class="num">11.3</td><td class="num">183.7</td>
+            <td class="num">582.5</td><td class="num">30,542.9</td><td class="num">186.2</td>
+            <td class="num">9.2</td><td class="num">7.6</td><td class="num">123.4</td>
+          </tr>
+          <tr>
+            <td><span class="dot" style="background:var(--c4)"></span>Cold + SQ</td>
+            <td class="num">798.5</td><td class="num">21.5</td><td class="num">33.7</td><td class="num">42.6</td>
+            <td class="num">50.8</td><td class="num">8,954.8</td><td class="num">46.5</td>
+            <td class="num" style="color:var(--critical); font-weight:600;">172.9</td><td class="num">24.6</td><td class="num">0.01</td>
+          </tr>
+          <tr>
+            <td><span class="dot" style="background:var(--c5)"></span>HS-Rec</td>
+            <td class="num">1,096.0</td><td class="num">37.6</td><td class="num">26.6</td><td class="num">33.3</td>
+            <td class="num">38.0</td><td class="num">68.1</td><td class="num">26.6</td>
+            <td class="num" style="color:var(--critical); font-weight:600;">171.8</td><td class="num">22.3</td><td class="num">0.0</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Takeaways</h2>
+    <ul class="takeaways">
+      <li>
+        <strong>Cached is the latency baseline to beat.</strong> With everything in the page cache, p99 stays
+        under 13.1ms and the worst query ever seen is 15.6ms — the tightest, most predictable distribution of
+        the five presets, unsurprising since the whole 9.2GB working set fits comfortably in cache.
+      </li>
+      <li>
+        <strong>Quantization on the cached tier trades median for tail.</strong> Cached + SQ improves p50 from
+        10.7ms to 6.7ms (smaller vectors, cheaper scoring) but p99 balloons to 121.8ms and the max to 316.8ms.
+        Its cache was still warming during the run (8.6→9.5GB) and it read 31.9GB from disk despite being
+        nominally "cached" — some fraction of queries paid a genuine cold-page cost mid-benchmark.
+      </li>
+      <li>
+        <strong>Cold, unquantized, is the worst case by a wide margin.</strong> 5.4 qps, p99 of 582.5ms, and one
+        query that took 30.5 seconds. Page cache grew from 429MB to 7.6GB <em>during the benchmark</em>, with
+        123.4GB of disk read to service 1,677 queries — an 18× read amplification over the actual data touched,
+        consistent with repeated cold-page HNSW graph traversal rather than a one-time warm-up cost.
+      </li>
+      <li>
+        <strong>Quantization is what makes cold tolerable.</strong> Cold + SQ recovers throughput to 21.5 qps
+        (4× over plain Cold) and cuts disk reads from 123.4GB to essentially zero (0.01GB) — most scoring
+        happens against the small quantized vectors instead of paging in full-precision cold vectors. That
+        drop in read volume is the real story, independent of the disk-footprint anomaly flagged above.
+      </li>
+      <li>
+        <strong>Pinning the quantized vectors (HS-Rec) buys the most predictable cold-tier tail.</strong> p99 of
+        38.0ms and a max of just 68.1ms — no multi-second spikes at all, unlike Cold + SQ's 9.0s max. The cost
+        is upload time (slowest of all five, 1,096.0s) and losing payload storage entirely (this preset carries
+        no payload / payload index), so it's a fit specifically for pure vector-search / recommendation
+        workloads rather than general search.
+      </li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>For the cloud-scale run</h2>
+    <ul class="takeaways">
+      <li><strong>Verify the disk-footprint anomaly first.</strong> If the ~470× HNSW inline+quantization
+        multiplier holds at 10–100× the point count, provisioning for Cold + SQ / HS-Rec-style presets needs to
+        budget disk very differently than the other three presets — check this before sizing cloud storage.</li>
+      <li><strong>Separate cold-start cost from steady state.</strong> All cold-tier numbers here are first-run,
+        cache-empty numbers. Consider a warm-up pass (discarded from the reported numbers) before measuring
+        cold-tier presets at scale, so the report distinguishes "restore tax" from steady-state latency.</li>
+      <li><strong>Watch vector IO read, not just latency.</strong> It was the clearest signal of what quantization
+        actually buys under the cold tier (123.4GB → 0.01GB) — worth keeping as a tracked metric alongside
+        qps/p99 at the larger scale.</li>
+    </ul>
+  </section>
+
+  <footer>
+    Generated from <code>results/1.8M/{full-cached-no-quantization, full-cached-w-quantization, full-cold-no-quantization, full-cold-w-quantization, high-speed-recommendation}</code>.
+    See <code>README.md</code> for how each preset is produced.
+  </footer>
+</div>
+
+<div id="tooltip"></div>
+<script>
+  var tooltip = document.getElementById('tooltip');
+  var groups = document.querySelectorAll('.bar-group');
+  groups.forEach(function (g) {
+    var name = g.getAttribute('data-name');
+    var value = g.getAttribute('data-value');
+    function show(e) {
+      var nameEl = document.createElement('span');
+      nameEl.className = 'name';
+      nameEl.textContent = name;
+      var strong = document.createElement('strong');
+      strong.textContent = value;
+      tooltip.textContent = '';
+      tooltip.appendChild(strong);
+      tooltip.appendChild(nameEl);
+      tooltip.style.opacity = '1';
+      move(e);
+    }
+    function move(e) {
+      var p = e.touches ? e.touches[0] : e;
+      tooltip.style.left = p.clientX + 'px';
+      tooltip.style.top = (p.clientY - 10) + 'px';
+    }
+    function hide() { tooltip.style.opacity = '0'; }
+    g.addEventListener('pointerenter', show);
+    g.addEventListener('pointermove', move);
+    g.addEventListener('pointerleave', hide);
+    g.addEventListener('focus', show);
+    g.addEventListener('blur', hide);
+    g.setAttribute('tabindex', '0');
+  });
+</script>

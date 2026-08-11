@@ -12,6 +12,8 @@ cargo run --bin collection-setup -- \
     --dense-vectors-memory cold \
     --payload-memory cold \
     --payload-index-memory cold \
+    --quantize \
+    --quantized-vectors-memory cold \
     --field-to-index doc_id=keyword \
     --field-to-index url=keyword \
     --field-to-index title=keyword \

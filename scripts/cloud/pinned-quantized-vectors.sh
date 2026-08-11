@@ -10,8 +10,8 @@ cargo run --bin collection-setup -- \
     $COLLECTION_NAME \
     --verbose \
     --dense-vectors-memory cold \
-    --payload-memory cold \
-    --payload-index-memory cold \
+    --quantize \
+    --quantized-vectors-memory pinned \
     --field-to-index doc_id=keyword \
     --field-to-index url=keyword \
     --field-to-index title=keyword \

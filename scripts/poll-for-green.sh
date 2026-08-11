@@ -16,7 +16,7 @@ do
             sleep 5
         fi
     else
-        status=$(curl -s ${url}/collections/${COLLECTION_NAME} -H "api_key: ${QDRANT_API_KEY}" | jq -r ".result.status")
+        status=$(curl -s ${url}/collections/${COLLECTION_NAME} -H "api-key: ${QDRANT_API_KEY}" | jq -r ".result.status")
         if [[ "$status" == "green" ]]; then
             break
         else

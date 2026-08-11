@@ -1,0 +1,2 @@
+Upload done! Total points: 1760180, total batches: 215, total upload time: 634.876s (0.3 batches/s)
+batch upload latency: min=515.307111ms p50/median=1.333890182s p95=3.738761s p99=4.424823661s max=6.901152602s mean=1.830423363s

@@ -1,0 +1,545 @@
+<title>Scalar vs TurboQuant — 1.8M Passage Benchmark</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --page-plane: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --gridline: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --critical: #d03b3b;
+    --critical-bg: #fbeceb;
+    --good: #0ca30c;
+    --c1: #2a78d6; /* Scalar (int8) */
+    --c2: #eb6834; /* TurboQuant (4-bit) */
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --surface-1: #1a1a19;
+      --page-plane: #0d0d0d;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --gridline: #2c2c2a;
+      --baseline: #383835;
+      --border: rgba(255,255,255,0.10);
+      --critical: #e66767;
+      --critical-bg: #2a1616;
+      --good: #0ca30c;
+      --c1: #3987e5;
+      --c2: #d95926;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page-plane);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 40px 24px 80px; }
+  header h1 { font-size: 26px; margin: 0 0 6px; }
+  header p.sub { color: var(--text-secondary); margin: 0 0 4px; font-size: 15px; }
+  header p.meta { color: var(--text-muted); margin: 0; font-size: 13px; }
+  h2 { font-size: 18px; margin: 48px 0 6px; }
+  h3 { font-size: 15px; margin: 28px 0 10px; color: var(--text-primary); }
+  section > p.lede { color: var(--text-secondary); margin: 0 0 20px; max-width: 760px; font-size: 14px; }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; }
+
+  .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 16px; }
+  .kpi { padding: 16px 18px; }
+  .kpi .label { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
+  .kpi .value { font-size: 26px; font-weight: 600; }
+  .kpi .value.good { color: var(--good); }
+  .kpi .foot { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; margin: 14px 0 20px; font-size: 13px; color: var(--text-secondary); }
+  .legend .item { display: flex; align-items: center; gap: 6px; }
+  .legend .swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  table.card { overflow: hidden; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--gridline); }
+  thead th { color: var(--text-secondary); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: .02em; border-bottom: 1px solid var(--baseline); }
+  tbody tr:last-child td { border-bottom: none; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td .dot { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:7px; vertical-align:1px; }
+  .table-scroll { overflow-x: auto; }
+  .table-scroll table { min-width: 820px; }
+
+  .chart-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-top: 16px; }
+  .chart-card { padding: 16px 18px 8px; }
+  .chart-card h4 { font-size: 13.5px; margin: 0 0 2px; font-weight: 600; }
+  .chart-card .chart-note { font-size: 12px; color: var(--text-muted); margin: 0 0 10px; }
+  svg.chart { width: 100%; height: auto; display: block; overflow: visible; }
+  .bar { cursor: pointer; }
+  .bar-group:hover .bar { filter: brightness(1.08); }
+  .bar-label { font-size: 11px; fill: var(--text-secondary); text-anchor: middle; font-variant-numeric: tabular-nums; }
+  .cat-label { font-size: 11.5px; fill: var(--text-primary); text-anchor: middle; font-weight: 600; }
+  .tick-label { font-size: 10.5px; fill: var(--text-muted); text-anchor: end; font-variant-numeric: tabular-nums; }
+  .grid-line { stroke: var(--gridline); stroke-width: 1; }
+  .axis-line { stroke: var(--baseline); stroke-width: 1; }
+
+  #tooltip {
+    position: fixed; pointer-events: none; z-index: 50;
+    background: var(--text-primary); color: var(--surface-1);
+    font-size: 12.5px; padding: 7px 10px; border-radius: 6px;
+    opacity: 0; transform: translate(-50%, -100%); transition: opacity .08s;
+    white-space: nowrap;
+  }
+  #tooltip strong { font-variant-numeric: tabular-nums; }
+  #tooltip .name { display:block; color: var(--text-secondary); font-size: 11px; margin-top: 2px; }
+
+  .callout { padding: 16px 18px; margin: 16px 0; border-radius: 10px; border: 1px solid var(--critical); background: var(--critical-bg); }
+  .callout.positive { border-color: var(--good); background: transparent; }
+  .callout .head { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--critical); font-size: 14px; margin-bottom: 6px; }
+  .callout.positive .head { color: var(--good); }
+  .callout p { margin: 6px 0; font-size: 13.5px; color: var(--text-primary); }
+  .callout p.muted { color: var(--text-secondary); }
+
+  code.diff { display: block; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; font-size: 12.5px; overflow-x: auto; margin: 12px 0; white-space: pre; }
+  code.diff .del { color: var(--critical); }
+  code.diff .add { color: var(--good); }
+
+  ul.takeaways { padding-left: 20px; margin: 10px 0; }
+  ul.takeaways li { margin-bottom: 10px; font-size: 14px; }
+  ul.takeaways li strong { font-weight: 600; }
+
+  footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--gridline); color: var(--text-muted); font-size: 12px; }
+
+  @media (max-width: 760px) {
+    .kpi-row { grid-template-columns: repeat(2, 1fr); }
+    .chart-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Scalar vs TurboQuant — 1.8M Passage Benchmark</h1>
+    <p class="sub">Same dataset, same two quantized presets, only the quantization method changed: scalar int8 &rarr; TurboQuant 4-bit.</p>
+    <p class="meta">MS MARCO v2.1 passage embeddings (Cohere) &middot; 1,760,180 points &middot; 1,677-query sequential search benchmark &middot; comparing <code>results/1.8M/</code> (scalar) against <code>results/1.8M-turbo/</code> (TurboQuant)</p>
+  </header>
+
+  <div class="kpi-row">
+    <div class="kpi card">
+      <div class="label">Search throughput</div>
+      <div class="value good">up to +122%</div>
+      <div class="foot">Cold + quant: 21.5 &rarr; 47.7 qps</div>
+    </div>
+    <div class="kpi card">
+      <div class="label">Tail latency (p99)</div>
+      <div class="value good">down up to 77%</div>
+      <div class="foot">Cached + quant: 121.8 &rarr; 28.3ms</div>
+    </div>
+    <div class="kpi card">
+      <div class="label">Quantized vector size</div>
+      <div class="value good">-49%</div>
+      <div class="foot">1.81GB &rarr; 0.92GB per collection</div>
+    </div>
+    <div class="kpi card">
+      <div class="label">Cold-tier disk footprint</div>
+      <div class="value" style="color:var(--critical)">-45%, still huge</div>
+      <div class="foot">172.9GB &rarr; 95.6GB — anomaly persists</div>
+    </div>
+  </div>
+
+  <section>
+    <h2>What changed</h2>
+    <p class="lede">
+      Only <code>crates/collection-setup/src/setup.rs</code> changed, and only for collections with
+      <code>quantized: true</code>. Everything else — dataset, tier layout, HNSW config, payload
+      indexes, query set — is identical to the earlier <code>results/1.8M/</code> run.
+    </p>
+    <code class="diff">- <span class="del">ScalarQuantizationBuilder::default().r#type(QuantizationType::Int8.into())</span>
++ <span class="add">TurboQuantizationBuilder::default().bits(TurboQuantBitSize::Bits4)</span></code>
+    <p class="lede" style="margin-top:4px;">
+      That's an 8-bit-per-dimension scheme swapped for a 4-bit one. Only the two presets that quantize
+      anything were rerun — <strong>Cached + quant</strong> and <strong>Cold + quant</strong> from the
+      original five. The other three presets (Cached, Cold, both unquantized) don't touch this code path
+      and weren't rerun.
+    </p>
+    <div class="legend">
+      <span class="item"><span class="swatch" style="background:var(--c1)"></span>Scalar (int8) — <code>results/1.8M/</code></span>
+      <span class="item"><span class="swatch" style="background:var(--c2)"></span>TurboQuant (4-bit) — <code>results/1.8M-turbo/</code></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Search performance</h2>
+    <p class="lede">Each chart groups the two presets (Cached, Cold) with Scalar and TurboQuant side by side, so the effect of switching quantization method is readable within each tier independently.</p>
+
+    <div class="chart-grid">
+      <div class="chart-card card">
+        <h4>Search throughput</h4>
+        <p class="chart-note">queries per second, higher is better</p>
+        <svg class="chart" viewBox="0 0 680 250" role="img" aria-label="Search throughput comparing scalar and turbo quantization, cached and cold tiers">
+          <line class="grid-line" x1="46" y1="26" x2="670" y2="26"></line>
+          <line class="grid-line" x1="46" y1="73.5" x2="670" y2="73.5"></line>
+          <line class="grid-line" x1="46" y1="121" x2="670" y2="121"></line>
+          <line class="grid-line" x1="46" y1="168.5" x2="670" y2="168.5"></line>
+          <text class="tick-label" x="40" y="29">180</text>
+          <text class="tick-label" x="40" y="76.5">135</text>
+          <text class="tick-label" x="40" y="124">90</text>
+          <text class="tick-label" x="40" y="171.5">45</text>
+          <text class="tick-label" x="40" y="219">0</text>
+          <line class="axis-line" x1="46" y1="216" x2="670" y2="216"></line>
+
+          <g class="bar-group" data-name="Cached, Scalar" data-value="99.2 qps">
+            <rect class="bar" x="152" y="111.3" width="48" height="104.7" rx="4" ry="4" fill="var(--c1)"></rect>
+            <rect x="152" y="211" width="48" height="5" fill="var(--c1)"></rect>
+            <text class="bar-label" x="176" y="105.3">99.2</text>
+          </g>
+          <g class="bar-group" data-name="Cached, TurboQuant" data-value="165.4 qps">
+            <rect class="bar" x="204" y="41.4" width="48" height="174.6" rx="4" ry="4" fill="var(--c2)"></rect>
+            <rect x="204" y="211" width="48" height="5" fill="var(--c2)"></rect>
+            <text class="bar-label" x="228" y="35.4">165.4</text>
+          </g>
+          <text class="cat-label" x="202" y="238">Cached</text>
+
+          <g class="bar-group" data-name="Cold, Scalar" data-value="21.5 qps">
+            <rect class="bar" x="464" y="193.3" width="48" height="22.7" rx="4" ry="4" fill="var(--c1)"></rect>
+            <rect x="464" y="211" width="48" height="5" fill="var(--c1)"></rect>
+            <text class="bar-label" x="488" y="187.3">21.5</text>
+          </g>
+          <g class="bar-group" data-name="Cold, TurboQuant" data-value="47.7 qps">
+            <rect class="bar" x="516" y="165.7" width="48" height="50.4" rx="4" ry="4" fill="var(--c2)"></rect>
+            <rect x="516" y="211" width="48" height="5" fill="var(--c2)"></rect>
+            <text class="bar-label" x="540" y="159.7">47.7</text>
+          </g>
+          <text class="cat-label" x="514" y="238">Cold</text>
+        </svg>
+      </div>
+
+      <div class="chart-card card">
+        <h4>Median latency (p50)</h4>
+        <p class="chart-note">milliseconds, lower is better</p>
+        <svg class="chart" viewBox="0 0 680 250" role="img" aria-label="Median search latency comparing scalar and turbo quantization, cached and cold tiers">
+          <line class="grid-line" x1="46" y1="26" x2="670" y2="26"></line>
+          <line class="grid-line" x1="46" y1="73.5" x2="670" y2="73.5"></line>
+          <line class="grid-line" x1="46" y1="121" x2="670" y2="121"></line>
+          <line class="grid-line" x1="46" y1="168.5" x2="670" y2="168.5"></line>
+          <text class="tick-label" x="40" y="29">40</text>
+          <text class="tick-label" x="40" y="76.5">30</text>
+          <text class="tick-label" x="40" y="124">20</text>
+          <text class="tick-label" x="40" y="171.5">10</text>
+          <text class="tick-label" x="40" y="219">0</text>
+          <line class="axis-line" x1="46" y1="216" x2="670" y2="216"></line>
+
+          <g class="bar-group" data-name="Cached, Scalar" data-value="6.66 ms">
+            <rect class="bar" x="152" y="184.4" width="48" height="31.6" rx="4" ry="4" fill="var(--c1)"></rect>
+            <rect x="152" y="211" width="48" height="5" fill="var(--c1)"></rect>
+            <text class="bar-label" x="176" y="178.4">6.7</text>
+          </g>
+          <g class="bar-group" data-name="Cached, TurboQuant" data-value="5.34 ms">
+            <rect class="bar" x="204" y="190.6" width="48" height="25.4" rx="4" ry="4" fill="var(--c2)"></rect>
+            <rect x="204" y="211" width="48" height="5" fill="var(--c2)"></rect>
+            <text class="bar-label" x="228" y="184.6">5.3</text>
+          </g>
+          <text class="cat-label" x="202" y="238">Cached</text>
+
+          <g class="bar-group" data-name="Cold, Scalar" data-value="33.74 ms">
+            <rect class="bar" x="464" y="55.7" width="48" height="160.3" rx="4" ry="4" fill="var(--c1)"></rect>
+            <rect x="464" y="211" width="48" height="5" fill="var(--c1)"></rect>
+            <text class="bar-label" x="488" y="49.7">33.7</text>
+          </g>
+          <g class="bar-group" data-name="Cold, TurboQuant" data-value="20.29 ms">
+            <rect class="bar" x="516" y="119.6" width="48" height="96.4" rx="4" ry="4" fill="var(--c2)"></rect>
+            <rect x="516" y="211" width="48" height="5" fill="var(--c2)"></rect>
+            <text class="bar-label" x="540" y="113.6">20.3</text>
+          </g>
+          <text class="cat-label" x="514" y="238">Cold</text>
+        </svg>
+      </div>
+
+      <div class="chart-card card">
+        <h4>p99 latency <span style="color:var(--text-muted); font-weight:400;">(log scale)</span></h4>
+        <p class="chart-note">milliseconds &middot; log axis, 1&ndash;1000ms</p>
+        <svg class="chart" viewBox="0 0 680 250" role="img" aria-label="p99 search latency comparing scalar and turbo quantization, cached and cold tiers, log scale">
+          <line class="grid-line" x1="46" y1="26" x2="670" y2="26"></line>
+          <line class="grid-line" x1="46" y1="89.3" x2="670" y2="89.3"></line>
+          <line class="grid-line" x1="46" y1="152.7" x2="670" y2="152.7"></line>
+          <text class="tick-label" x="40" y="29">1000</text>
+          <text class="tick-label" x="40" y="92.3">100</text>
+          <text class="tick-label" x="40" y="155.7">10</text>
+          <text class="tick-label" x="40" y="219">1</text>
+          <line class="axis-line" x1="46" y1="216" x2="670" y2="216"></line>
+
+          <g class="bar-group" data-name="Cached, Scalar" data-value="121.83 ms">
+            <rect class="bar" x="152" y="83.9" width="48" height="132.1" rx="4" ry="4" fill="var(--c1)"></rect>
+            <rect x="152" y="211.8" width="48" height="4.2" fill="var(--c1)"></rect>
+            <text class="bar-label" x="176" y="77.9">121.8</text>
+          </g>
+          <g class="bar-group" data-name="Cached, TurboQuant" data-value="28.28 ms">
+            <rect class="bar" x="204" y="124.1" width="48" height="91.9" rx="4" ry="4" fill="var(--c2)"></rect>
+            <rect x="204" y="211.9" width="48" height="4.1" fill="var(--c2)"></rect>
+            <text class="bar-label" x="228" y="118.1">28.3</text>
+          </g>
+          <text class="cat-label" x="202" y="238">Cached</text>
+
+          <g class="bar-group" data-name="Cold, Scalar" data-value="50.80 ms">
+            <rect class="bar" x="464" y="108" width="48" height="108" rx="4" ry="4" fill="var(--c1)"></rect>
+            <rect x="464" y="211.6" width="48" height="4.4" fill="var(--c1)"></rect>
+            <text class="bar-label" x="488" y="102">50.8</text>
+          </g>
+          <g class="bar-group" data-name="Cold, TurboQuant" data-value="29.09 ms">
+            <rect class="bar" x="516" y="123.3" width="48" height="92.7" rx="4" ry="4" fill="var(--c2)"></rect>
+            <rect x="516" y="211.9" width="48" height="4.1" fill="var(--c2)"></rect>
+            <text class="bar-label" x="540" y="117.3">29.1</text>
+          </g>
+          <text class="cat-label" x="514" y="238">Cold</text>
+        </svg>
+      </div>
+
+      <div class="chart-card card">
+        <h4>Max latency observed <span style="color:var(--text-muted); font-weight:400;">(log scale)</span></h4>
+        <p class="chart-note">milliseconds &middot; log axis, 1&ndash;10,000ms &middot; single worst query per run</p>
+        <svg class="chart" viewBox="0 0 680 250" role="img" aria-label="Maximum search latency comparing scalar and turbo quantization, cached and cold tiers, log scale">
+          <line class="grid-line" x1="46" y1="26" x2="670" y2="26"></line>
+          <line class="grid-line" x1="46" y1="73.5" x2="670" y2="73.5"></line>
+          <line class="grid-line" x1="46" y1="121" x2="670" y2="121"></line>
+          <line class="grid-line" x1="46" y1="168.5" x2="670" y2="168.5"></line>
+          <text class="tick-label" x="40" y="29">10000</text>
+          <text class="tick-label" x="40" y="76.5">1000</text>
+          <text class="tick-label" x="40" y="124">100</text>
+          <text class="tick-label" x="40" y="171.5">10</text>
+          <text class="tick-label" x="40" y="219">1</text>
+          <line class="axis-line" x1="46" y1="216" x2="670" y2="216"></line>
+
+          <g class="bar-group" data-name="Cached, Scalar" data-value="316.77 ms">
+            <rect class="bar" x="152" y="97.2" width="48" height="118.8" rx="4" ry="4" fill="var(--c1)"></rect>
+            <rect x="152" y="211" width="48" height="5" fill="var(--c1)"></rect>
+            <text class="bar-label" x="176" y="91.2">316.8</text>
+          </g>
+          <g class="bar-group" data-name="Cached, TurboQuant" data-value="101.35 ms">
+            <rect class="bar" x="204" y="120.7" width="48" height="95.3" rx="4" ry="4" fill="var(--c2)"></rect>
+            <rect x="204" y="211" width="48" height="5" fill="var(--c2)"></rect>
+            <text class="bar-label" x="228" y="114.7">101.3</text>
+          </g>
+          <text class="cat-label" x="202" y="238">Cached</text>
+
+          <g class="bar-group" data-name="Cold, Scalar" data-value="8,954.76 ms (9.0s)">
+            <rect class="bar" x="464" y="28.3" width="48" height="187.7" rx="4" ry="4" fill="var(--c1)"></rect>
+            <rect x="464" y="211" width="48" height="5" fill="var(--c1)"></rect>
+            <text class="bar-label" x="488" y="22.3">9.0s</text>
+          </g>
+          <g class="bar-group" data-name="Cold, TurboQuant" data-value="1,192.84 ms (1.19s)">
+            <rect class="bar" x="516" y="69.9" width="48" height="146.1" rx="4" ry="4" fill="var(--c2)"></rect>
+            <rect x="516" y="211" width="48" height="5" fill="var(--c2)"></rect>
+            <text class="bar-label" x="540" y="63.9">1.19s</text>
+          </g>
+          <text class="cat-label" x="514" y="238">Cold</text>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Disk footprint — the anomaly, revisited</h2>
+    <p class="lede">
+      The earlier <a href="../1.8M/report.html">1.8M report</a> flagged that combining inline HNSW storage
+      with quantization inflates the on-disk HNSW graph roughly 470&times; (346MB &rarr; 162GB) versus every
+      other preset. TurboQuant doesn't remove that effect, but it roughly halves it.
+    </p>
+    <div class="chart-grid">
+      <div class="chart-card card">
+        <h4>Total collection disk usage <span style="color:var(--text-muted); font-weight:400;">(log scale)</span></h4>
+        <p class="chart-note">gigabytes &middot; log axis, 1&ndash;1000GB &middot; same 1.76M points in every bar</p>
+        <svg class="chart" viewBox="0 0 680 250" role="img" aria-label="Total collection disk usage comparing scalar and turbo quantization, cached and cold tiers, log scale">
+          <line class="grid-line" x1="46" y1="26" x2="670" y2="26"></line>
+          <line class="grid-line" x1="46" y1="89.3" x2="670" y2="89.3"></line>
+          <line class="grid-line" x1="46" y1="152.7" x2="670" y2="152.7"></line>
+          <text class="tick-label" x="40" y="29">1000</text>
+          <text class="tick-label" x="40" y="92.3">100</text>
+          <text class="tick-label" x="40" y="155.7">10</text>
+          <text class="tick-label" x="40" y="219">1</text>
+          <line class="axis-line" x1="46" y1="216" x2="670" y2="216"></line>
+
+          <g class="bar-group" data-name="Cached, Scalar" data-value="10.94 GB">
+            <rect class="bar" x="152" y="150.2" width="48" height="65.8" rx="4" ry="4" fill="var(--c1)"></rect>
+            <rect x="152" y="211" width="48" height="5" fill="var(--c1)"></rect>
+            <text class="bar-label" x="176" y="144.2">10.9</text>
+          </g>
+          <g class="bar-group" data-name="Cached, TurboQuant" data-value="10.05 GB">
+            <rect class="bar" x="204" y="152.5" width="48" height="63.5" rx="4" ry="4" fill="var(--c2)"></rect>
+            <rect x="204" y="211" width="48" height="5" fill="var(--c2)"></rect>
+            <text class="bar-label" x="228" y="146.5">10.1</text>
+          </g>
+          <text class="cat-label" x="202" y="238">Cached</text>
+
+          <g class="bar-group" data-name="Cold, Scalar" data-value="172.88 GB">
+            <rect class="bar" x="464" y="74.3" width="48" height="141.7" rx="4" ry="4" fill="var(--c1)"></rect>
+            <rect x="464" y="211" width="48" height="5" fill="var(--c1)"></rect>
+            <text class="bar-label" x="488" y="68.3">172.9</text>
+          </g>
+          <g class="bar-group" data-name="Cold, TurboQuant" data-value="95.62 GB">
+            <rect class="bar" x="516" y="90.6" width="48" height="125.4" rx="4" ry="4" fill="var(--c2)"></rect>
+            <rect x="516" y="211" width="48" height="5" fill="var(--c2)"></rect>
+            <text class="bar-label" x="540" y="84.6">95.6</text>
+          </g>
+          <text class="cat-label" x="514" y="238">Cold</text>
+        </svg>
+      </div>
+
+      <div class="chart-card card" style="display:flex; flex-direction:column; justify-content:center;">
+        <h4>Reading the disk numbers</h4>
+        <p style="font-size:13.5px; color:var(--text-secondary); margin-top:8px;">
+          On the Cached tier the difference is small either way (10.9GB vs 10.1GB) — inline storage isn't in
+          play there, so this is just the raw size of int8 vs 4-bit quantized vectors.
+        </p>
+        <p style="font-size:13.5px; color:var(--text-secondary);">
+          On the Cold tier — where inline HNSW storage combines with quantization — TurboQuant cuts total
+          disk from 172.9GB to 95.6GB (index disk specifically: 162.3GB &rarr; 85.9GB). That's a ~44%
+          reduction, roughly tracking the halved quantized-vector bit width, but the underlying inline-storage
+          +&nbsp;quantization interaction that causes the blow-up in the first place is still there.
+        </p>
+      </div>
+    </div>
+    <div class="callout">
+      <div class="head">&#9888; Still worth verifying before the cloud-scale run</div>
+      <p>
+        TurboQuant halves the damage but Cold + quant still uses ~9&times; the disk of every non-inline-storage
+        preset for the same 1.76M points. If this scales linearly, disk sizing for a cloud cluster running
+        this preset needs to budget for that multiplier — it doesn't go away with the quantization switch,
+        it's just smaller.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Full results</h2>
+    <p class="lede">Raw numbers behind every chart above. Search latency percentiles are per-query milliseconds over 1,677 sequential queries.</p>
+    <div class="table-scroll">
+      <table class="card">
+        <thead>
+          <tr>
+            <th>Preset</th><th>Quant.</th>
+            <th class="num">Upload (s)</th>
+            <th class="num">QPS</th>
+            <th class="num">p50 (ms)</th>
+            <th class="num">p95 (ms)</th>
+            <th class="num">p99 (ms)</th>
+            <th class="num">Max (ms)</th>
+            <th class="num">Quant. vectors (GB)</th>
+            <th class="num">Total disk (GB)</th>
+            <th class="num">Vector IO read (GB)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Cached + quant</td><td><span class="dot" style="background:var(--c1)"></span>Scalar</td>
+            <td class="num">729.2</td><td class="num">99.2</td><td class="num">6.7</td><td class="num">13.2</td>
+            <td class="num">121.8</td><td class="num">316.8</td><td class="num">1.81</td><td class="num">10.9</td><td class="num">31.9</td>
+          </tr>
+          <tr>
+            <td>Cached + quant</td><td><span class="dot" style="background:var(--c2)"></span>TurboQuant</td>
+            <td class="num">821.9</td><td class="num">165.4</td><td class="num">5.3</td><td class="num">7.1</td>
+            <td class="num">28.3</td><td class="num">101.3</td><td class="num">0.92</td><td class="num">10.1</td><td class="num">16.4</td>
+          </tr>
+          <tr>
+            <td>Cold + quant</td><td><span class="dot" style="background:var(--c1)"></span>Scalar</td>
+            <td class="num">798.5</td><td class="num">21.5</td><td class="num">33.7</td><td class="num">42.6</td>
+            <td class="num">50.8</td><td class="num">8,954.8</td><td class="num">1.81</td>
+            <td class="num" style="color:var(--critical); font-weight:600;">172.9</td><td class="num">0.010</td>
+          </tr>
+          <tr>
+            <td>Cold + quant</td><td><span class="dot" style="background:var(--c2)"></span>TurboQuant</td>
+            <td class="num">634.9</td><td class="num">47.7</td><td class="num">20.3</td><td class="num">25.9</td>
+            <td class="num">29.1</td><td class="num">1,192.8</td><td class="num">0.92</td>
+            <td class="num" style="color:var(--critical); font-weight:600;">95.6</td><td class="num">0.005</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Takeaways</h2>
+    <ul class="takeaways">
+      <li>
+        <strong>TurboQuant wins on every search metric tested, in both tiers.</strong> Cached + quant: +67%
+        throughput (99.2&rarr;165.4 qps), p99 down 77% (121.8&rarr;28.3ms). Cold + quant: +122% throughput
+        (21.5&rarr;47.7 qps), max latency down 87% (9.0s&rarr;1.19s). No metric got worse.
+      </li>
+      <li>
+        <strong>The quantized vectors are almost exactly half the size</strong> — 1.81GB &rarr; 0.92GB per
+        collection, consistent with the 8-bit&rarr;4-bit change. Vector IO read during search roughly halved
+        too (Cached: 31.9&rarr;16.4GB; Cold: 10MB&rarr;5MB), so less has to move through the page cache to
+        answer the same queries.
+      </li>
+      <li>
+        <strong>Upload cost moved in opposite directions per tier</strong> — 13% slower on Cached
+        (729.2s&rarr;821.9s) but 20% faster on Cold (798.5s&rarr;634.9s). Only one run per config exists, so
+        treat this as a lead to confirm with a repeat run rather than a settled result.
+      </li>
+      <li>
+        <strong>The inline-storage + quantization disk anomaly survives the switch, just smaller.</strong>
+        Cold + quant disk footprint drops from 172.9GB to 95.6GB, but that's still ~9&times; every
+        non-inline-storage preset for the same data. TurboQuant makes the problem more affordable, it doesn't
+        fix its root cause.
+      </li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>For the cloud-scale run</h2>
+    <ul class="takeaways">
+      <li><strong>Prefer TurboQuant over scalar for any cold-tier + inline-HNSW preset.</strong> It's strictly
+        better on latency, throughput, and disk in this data — there's no tradeoff visible here to weigh
+        against it.</li>
+      <li><strong>Re-run the upload-time comparison once</strong> before trusting the cached/cold split — a
+        13%-slower vs. 20%-faster result from a single run each is exactly the kind of thing that turns out to
+        be noise.</li>
+      <li><strong>Keep budgeting disk for the inline-storage + quantization multiplier</strong> even with
+        TurboQuant — 95.6GB for 1.76M points is still roughly 9&times; the non-inline-storage presets, and
+        that ratio is what should inform cloud disk sizing, not the absolute GB figure from this run.</li>
+    </ul>
+  </section>
+
+  <footer>
+    Generated from <code>results/1.8M/{full-cached-w-quantization, full-cold-w-quantization}</code> (scalar
+    int8) vs. <code>results/1.8M-turbo/{full-cached-w-quantization, full-cold-w-quantization}</code>
+    (TurboQuant 4-bit). See <code>README.md</code> and the <a href="../1.8M/report.html">1.8M report</a> for
+    the full five-preset baseline.
+  </footer>
+</div>
+
+<div id="tooltip"></div>
+<script>
+  var tooltip = document.getElementById('tooltip');
+  var groups = document.querySelectorAll('.bar-group');
+  groups.forEach(function (g) {
+    var name = g.getAttribute('data-name');
+    var value = g.getAttribute('data-value');
+    function show(e) {
+      var nameEl = document.createElement('span');
+      nameEl.className = 'name';
+      nameEl.textContent = name;
+      var strong = document.createElement('strong');
+      strong.textContent = value;
+      tooltip.textContent = '';
+      tooltip.appendChild(strong);
+      tooltip.appendChild(nameEl);
+      tooltip.style.opacity = '1';
+      move(e);
+    }
+    function move(e) {
+      var p = e.touches ? e.touches[0] : e;
+      tooltip.style.left = p.clientX + 'px';
+      tooltip.style.top = (p.clientY - 10) + 'px';
+    }
+    function hide() { tooltip.style.opacity = '0'; }
+    g.addEventListener('pointerenter', show);
+    g.addEventListener('pointermove', move);
+    g.addEventListener('pointerleave', hide);
+    g.addEventListener('focus', show);
+    g.addEventListener('blur', hide);
+    g.setAttribute('tabindex', '0');
+  });
+</script>
