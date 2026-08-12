@@ -1,0 +1,572 @@
+<title>Memory Tiers on 3.8M Points — Search Latency &amp; Resource Efficiency</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg:        #f9f9f7;
+    --surface:   #fcfcfb;
+    --text:      #0b0b0b;
+    --text-2:    #52514e;
+    --muted:     #898781;
+    --grid:      #e1e0d9;
+    --baseline:  #c3c2b7;
+    --border:    rgba(11,11,11,0.10);
+    --good:      #006300;
+    --s1: #2a78d6; /* blue   */
+    --s2: #eb6834; /* orange */
+    --s3: #1baf7a; /* aqua   */
+    --s4: #eda100; /* yellow */
+    --s5: #e87ba4; /* magenta*/
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg:        #0d0d0d;
+      --surface:   #1a1a19;
+      --text:      #ffffff;
+      --text-2:    #c3c2b7;
+      --muted:     #898781;
+      --grid:      #2c2c2a;
+      --baseline:  #383835;
+      --border:    rgba(255,255,255,0.10);
+      --good:      #0ca30c;
+      --s1: #3987e5;
+      --s2: #d95926;
+      --s3: #199e70;
+      --s4: #c98500;
+      --s5: #d55181;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg:        #0d0d0d;
+    --surface:   #1a1a19;
+    --text:      #ffffff;
+    --text-2:    #c3c2b7;
+    --muted:     #898781;
+    --grid:      #2c2c2a;
+    --baseline:  #383835;
+    --border:    rgba(255,255,255,0.10);
+    --good:      #0ca30c;
+    --s1: #3987e5;
+    --s2: #d95926;
+    --s3: #199e70;
+    --s4: #c98500;
+    --s5: #d55181;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.55;
+    margin: 0;
+    padding: 0 20px 64px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+
+  header.page { padding: 48px 0 20px; }
+  h1 { font-size: 1.65rem; font-weight: 700; margin: 0 0 8px; letter-spacing: -0.01em; }
+  .subtitle { color: var(--text-2); font-size: 1.02rem; margin: 0 0 20px; max-width: 700px; }
+  .meta-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 999px; padding: 5px 12px; font-size: 0.82rem; color: var(--text-2);
+  }
+
+  section { margin: 40px 0; }
+  h2 { font-size: 1.2rem; font-weight: 700; margin: 0 0 6px; }
+  h3 { font-size: 1.0rem; font-weight: 700; margin: 28px 0 4px; }
+  .lede { color: var(--text-2); font-size: 0.95rem; margin: 0 0 20px; max-width: 700px; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px 22px 12px;
+  }
+
+  .callout {
+    border-left: 3px solid var(--s1);
+    background: var(--surface);
+    border-radius: 0 10px 10px 0;
+    padding: 12px 16px;
+    margin: 14px 0;
+    font-size: 0.92rem;
+    color: var(--text-2);
+  }
+  .callout b { color: var(--text); }
+  .callout.win { border-left-color: var(--good); }
+  .callout.warn { border-left-color: var(--s2); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.86rem; margin-top: 8px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.02em; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.rowlabel { display: flex; align-items: center; gap: 8px; white-space: normal; min-width: 190px; }
+  .swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; display: inline-block; }
+  .table-scroll { overflow-x: auto; }
+
+  .chart { width: 100%; height: auto; display: block; }
+  .chart .gridline { stroke: var(--grid); stroke-width: 1; }
+  .chart .axis-line { stroke: var(--baseline); stroke-width: 1; }
+  .chart .axis-label { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .chart .axis-label-x { fill: var(--text-2); font-size: 11px; text-anchor: middle; }
+  .chart .line { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .chart .marker { stroke: var(--surface); stroke-width: 2; }
+  .chart .marker-lg { stroke: var(--surface); stroke-width: 2.5; }
+  .chart .end-label { font-size: 12px; font-weight: 600; dominant-baseline: middle; }
+  .chart .bar-label { fill: var(--text-2); font-size: 12px; dominant-baseline: middle; }
+  .chart .value-tip { fill: var(--text); font-size: 12px; font-weight: 600; dominant-baseline: middle; font-variant-numeric: tabular-nums; }
+  .chart .value-tip-top { fill: var(--text); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .chart .disk-tick { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 3 2; }
+  .chart .disk-label { fill: var(--muted); font-size: 10px; }
+  .chart .point-label { fill: var(--text); font-size: 12px; font-weight: 600; }
+  .chart .corner-label { fill: var(--muted); font-size: 11px; font-style: italic; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 14px 20px; margin: 10px 0 4px; font-size: 0.82rem; color: var(--text-2); }
+  .legend-item { display: flex; align-items: center; gap: 7px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+  .legend-line { width: 16px; height: 2px; display: inline-block; flex: none; }
+  .legend-swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: none; }
+
+  .verdict-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 14px; }
+  .verdict-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .verdict-card .tag { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; }
+  .verdict-card h4 { margin: 6px 0 6px; font-size: 0.98rem; }
+  .verdict-card p { margin: 0; font-size: 0.86rem; color: var(--text-2); }
+
+  footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--grid); color: var(--muted); font-size: 0.8rem; }
+  footer ul { padding-left: 18px; margin: 8px 0; }
+  footer li { margin-bottom: 6px; }
+  code { background: var(--grid); border-radius: 4px; padding: 1px 5px; font-size: 0.85em; }
+</style>
+
+<div class="wrap">
+
+<header class="page">
+  <div class="meta-row">
+    <span class="pill">Qdrant Cloud</span>
+    <span class="pill">MS MARCO v2.1 passages (Cohere embed-v3)</span>
+    <span class="pill">3,750,897 points</span>
+    <span class="pill">1,677 sequential search queries</span>
+  </div>
+  <h1>Memory Tiers at 3.8M Points: Search Latency &amp; Resource Efficiency</h1>
+  <p class="subtitle">
+    Five memory-tier layouts from <code>scripts/cloud/</code> — dense vectors, payloads, payload
+    indexes, and quantized vectors each pinned to <code>cached</code>, <code>cold</code>, or
+    <code>pinned</code> storage — benchmarked against the same ~3.75M-point collection on a single
+    Qdrant Cloud cluster. This report compares their search-latency profile and their memory
+    footprint to find the best latency-per-gigabyte trade-off.
+  </p>
+</header>
+
+<section id="matrix">
+  <h2>1. What was tested</h2>
+  <p class="lede">Each configuration builds the same collection — dense vectors, keyword/int payload indexes on 5 fields — with a different per-component memory tier, then runs the identical 1,677-query search benchmark.</p>
+  <div class="card">
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Configuration</th><th>Dense vectors</th><th>Payload</th><th>Payload index</th><th>Quantization</th><th>Quantized-vector tier</th></tr></thead>
+      <tbody>
+        <tr>
+      <td class="rowlabel"><span class="swatch" style="background:var(--s1)"></span>Full Cached, No Quantization</td>
+      <td>Cached</td>
+      <td>Cached</td>
+      <td>Cached</td>
+      <td>Off</td>
+      <td>-</td>
+    </tr>
+<tr>
+      <td class="rowlabel"><span class="swatch" style="background:var(--s2)"></span>Full Cached, With Quantization</td>
+      <td>Cached</td>
+      <td>Cached</td>
+      <td>Cached</td>
+      <td>On (int8)</td>
+      <td>Cached</td>
+    </tr>
+<tr>
+      <td class="rowlabel"><span class="swatch" style="background:var(--s3)"></span>Full Cold, No Quantization</td>
+      <td>Cold</td>
+      <td>Cold</td>
+      <td>Cold</td>
+      <td>Off</td>
+      <td>-</td>
+    </tr>
+<tr>
+      <td class="rowlabel"><span class="swatch" style="background:var(--s4)"></span>Full Cold, With Quantization</td>
+      <td>Cold</td>
+      <td>Cold</td>
+      <td>Cold</td>
+      <td>On (int8)</td>
+      <td>Cold</td>
+    </tr>
+<tr>
+      <td class="rowlabel"><span class="swatch" style="background:var(--s5)"></span>Pinned Quantized Vectors</td>
+      <td>Cold</td>
+      <td>(default)</td>
+      <td>(default)</td>
+      <td>On (int8)</td>
+      <td>Pinned</td>
+    </tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+</section>
+
+<section id="latency">
+  <h2>2. Search latency</h2>
+  <p class="lede">Latency across the percentile spread — where a config sits at <b>p50</b> shows typical-case speed; where it sits at <b>p99</b>/<b>max</b> shows how badly a tail query can stall. Y-axis is log-scaled to fit the ~30&times; range between the fastest median and the slowest outlier on one chart.</p>
+  <div class="card">
+    <svg class="chart" viewBox="0 0 720 400" role="img" aria-labelledby="c1title c1desc">
+<title id="c1title">Search latency across percentiles, by memory-tier configuration</title>
+<desc id="c1desc">Line chart, log-scale milliseconds on the y-axis, min/p50/p95/p99/max on the x-axis, one line per configuration.</desc>
+<line class="gridline" x1="64" y1="333.8" x2="568" y2="333.8" />
+<text class="axis-label" x="54" y="337.8" text-anchor="end">200ms</text>
+<line class="gridline" x1="64" y1="250.3" x2="568" y2="250.3" />
+<text class="axis-label" x="54" y="254.3" text-anchor="end">500ms</text>
+<line class="gridline" x1="64" y1="187.2" x2="568" y2="187.2" />
+<text class="axis-label" x="54" y="191.2" text-anchor="end">1,000ms</text>
+<line class="gridline" x1="64" y1="124.1" x2="568" y2="124.1" />
+<text class="axis-label" x="54" y="128.1" text-anchor="end">2,000ms</text>
+<line class="gridline" x1="64" y1="40.6" x2="568" y2="40.6" />
+<text class="axis-label" x="54" y="44.6" text-anchor="end">5,000ms</text>
+<line class="axis-line" x1="64" y1="360.0" x2="568" y2="360.0" />
+<text class="axis-label-x" x="64.0" y="384" text-anchor="middle">min</text>
+<text class="axis-label-x" x="190.0" y="384" text-anchor="middle">p50</text>
+<text class="axis-label-x" x="316.0" y="384" text-anchor="middle">p95</text>
+<text class="axis-label-x" x="442.0" y="384" text-anchor="middle">p99</text>
+<text class="axis-label-x" x="568.0" y="384" text-anchor="middle">max</text>
+<polyline class="line" points="64.0,331.7 190.0,295.9 316.0,293.9 442.0,289.0 568.0,196.5" style="stroke:var(--s1)" />
+<circle class="marker" cx="64.0" cy="331.7" r="4" style="fill:var(--s1)"><title>Full Cached, No Quantization — max: 204.6 ms</title></circle>
+<circle class="marker" cx="190.0" cy="295.9" r="4" style="fill:var(--s1)"><title>Full Cached, No Quantization — max: 303.1 ms</title></circle>
+<circle class="marker" cx="316.0" cy="293.9" r="4" style="fill:var(--s1)"><title>Full Cached, No Quantization — max: 310.0 ms</title></circle>
+<circle class="marker" cx="442.0" cy="289.0" r="4" style="fill:var(--s1)"><title>Full Cached, No Quantization — max: 326.9 ms</title></circle>
+<circle class="marker" cx="568.0" cy="196.5" r="4" style="fill:var(--s1)"><title>Full Cached, No Quantization — max: 902.7 ms</title></circle>
+<text class="end-label" x="578.0" y="200.5" style="fill:var(--s1)">Cached · No Quant</text>
+<polyline class="line" points="64.0,341.4 190.0,329.1 316.0,280.0 442.0,214.9 568.0,138.9" style="stroke:var(--s2)" />
+<circle class="marker" cx="64.0" cy="341.4" r="4" style="fill:var(--s2)"><title>Full Cached, With Quantization — max: 184.0 ms</title></circle>
+<circle class="marker" cx="190.0" cy="329.1" r="4" style="fill:var(--s2)"><title>Full Cached, With Quantization — max: 210.7 ms</title></circle>
+<circle class="marker" cx="316.0" cy="280.0" r="4" style="fill:var(--s2)"><title>Full Cached, With Quantization — max: 361.1 ms</title></circle>
+<circle class="marker" cx="442.0" cy="214.9" r="4" style="fill:var(--s2)"><title>Full Cached, With Quantization — max: 737.5 ms</title></circle>
+<circle class="marker" cx="568.0" cy="138.9" r="4" style="fill:var(--s2)"><title>Full Cached, With Quantization — max: 1,699.4 ms</title></circle>
+<text class="end-label" x="578.0" y="142.9" style="fill:var(--s2)">Cached · Quant</text>
+<polyline class="line" points="64.0,341.1 190.0,328.7 316.0,147.9 442.0,62.5 568.0,31.4" style="stroke:var(--s3)" />
+<circle class="marker" cx="64.0" cy="341.1" r="4" style="fill:var(--s3)"><title>Full Cold, No Quantization — max: 184.6 ms</title></circle>
+<circle class="marker" cx="190.0" cy="328.7" r="4" style="fill:var(--s3)"><title>Full Cold, No Quantization — max: 211.4 ms</title></circle>
+<circle class="marker" cx="316.0" cy="147.9" r="4" style="fill:var(--s3)"><title>Full Cold, No Quantization — max: 1,540.3 ms</title></circle>
+<circle class="marker" cx="442.0" cy="62.5" r="4" style="fill:var(--s3)"><title>Full Cold, No Quantization — max: 3,933.8 ms</title></circle>
+<circle class="marker" cx="568.0" cy="31.4" r="4" style="fill:var(--s3)"><title>Full Cold, No Quantization — max: 5,529.0 ms</title></circle>
+<text class="end-label" x="578.0" y="35.4" style="fill:var(--s3)">Cold · No Quant</text>
+<polyline class="line" points="64.0,331.6 190.0,295.3 316.0,264.5 442.0,140.8 568.0,68.3" style="stroke:var(--s4)" />
+<circle class="marker" cx="64.0" cy="331.6" r="4" style="fill:var(--s4)"><title>Full Cold, With Quantization — max: 204.8 ms</title></circle>
+<circle class="marker" cx="190.0" cy="295.3" r="4" style="fill:var(--s4)"><title>Full Cold, With Quantization — max: 305.2 ms</title></circle>
+<circle class="marker" cx="316.0" cy="264.5" r="4" style="fill:var(--s4)"><title>Full Cold, With Quantization — max: 427.8 ms</title></circle>
+<circle class="marker" cx="442.0" cy="140.8" r="4" style="fill:var(--s4)"><title>Full Cold, With Quantization — max: 1,664.6 ms</title></circle>
+<circle class="marker" cx="568.0" cy="68.3" r="4" style="fill:var(--s4)"><title>Full Cold, With Quantization — max: 3,687.3 ms</title></circle>
+<text class="end-label" x="578.0" y="72.3" style="fill:var(--s4)">Cold · Quant</text>
+<polyline class="line" points="64.0,341.9 190.0,331.7 316.0,323.7 442.0,318.7 568.0,185.0" style="stroke:var(--s5)" />
+<circle class="marker" cx="64.0" cy="341.9" r="4" style="fill:var(--s5)"><title>Pinned Quantized Vectors — max: 182.9 ms</title></circle>
+<circle class="marker" cx="190.0" cy="331.7" r="4" style="fill:var(--s5)"><title>Pinned Quantized Vectors — max: 204.8 ms</title></circle>
+<circle class="marker" cx="316.0" cy="323.7" r="4" style="fill:var(--s5)"><title>Pinned Quantized Vectors — max: 223.4 ms</title></circle>
+<circle class="marker" cx="442.0" cy="318.7" r="4" style="fill:var(--s5)"><title>Pinned Quantized Vectors — max: 236.0 ms</title></circle>
+<circle class="marker" cx="568.0" cy="185.0" r="4" style="fill:var(--s5)"><title>Pinned Quantized Vectors — max: 1,024.6 ms</title></circle>
+<text class="end-label" x="578.0" y="189.0" style="fill:var(--s5)">Pinned Quant</text>
+</svg>
+    <div class="legend">
+      <span class="legend-item"><span class="legend-line" style="background:var(--s1)"></span>Full Cached, No Quantization</span><span class="legend-item"><span class="legend-line" style="background:var(--s2)"></span>Full Cached, With Quantization</span><span class="legend-item"><span class="legend-line" style="background:var(--s3)"></span>Full Cold, No Quantization</span><span class="legend-item"><span class="legend-line" style="background:var(--s4)"></span>Full Cold, With Quantization</span><span class="legend-item"><span class="legend-line" style="background:var(--s5)"></span>Pinned Quantized Vectors</span>
+    </div>
+  </div>
+
+  <div class="callout win"><b>Pinned Quantized Vectors</b> has the flattest, tightest curve of the five: p50 204.8&nbsp;ms and p99 236.0&nbsp;ms are only 15% apart. Every other configuration's tail is at least 2&ndash;17&times; its own median.</div>
+  <div class="callout warn"><b>Full Cold, No Quantization</b> has the widest spread: p50 211.4&nbsp;ms looks competitive, but p95 jumps to 1.54&nbsp;s and p99 to 3.93&nbsp;s (max 5.53&nbsp;s) — an 18&times; blowup from median to p99, the signature of cache misses falling through to disk on the full-size float vectors.</div>
+  <div class="callout">Quantization's effect on the tail depends on the storage tier it's paired with. On <b>cold</b> storage it tightens the tail sharply: p99 falls from 3.93&nbsp;s to 1.66&nbsp;s (2.4&times;) and max from 5.53&nbsp;s to 3.69&nbsp;s, because HNSW scoring hits the much smaller quantized vectors instead of striking cold disk-backed float vectors on every candidate. On <b>cached</b> storage — where the float vectors were already fully resident and fast — adding quantization instead <em>widens</em> the tail (p99 326.9&nbsp;ms&rarr;737.5&nbsp;ms, max 902.7&nbsp;ms&rarr;1.70&nbsp;s), likely the added rescoring/decompression step showing up once the cheap cache hit is no longer the bottleneck. Quantization helps most exactly where the uncompressed path was already the slow one.</div>
+
+  <h3>Throughput (queries/sec)</h3>
+  <div class="card">
+    <svg class="chart" viewBox="0 0 720 300" role="img" aria-labelledby="c2title c2desc">
+<title id="c2title">Query throughput by configuration</title>
+<desc id="c2desc">Horizontal bar chart of sustained queries per second, sorted highest to lowest.</desc>
+<line class="gridline" x1="190.0" y1="20" x2="190.0" y2="280" />
+<text class="axis-label" x="190.0" y="296" text-anchor="middle">0</text>
+<line class="gridline" x1="273.6" y1="20" x2="273.6" y2="280" />
+<text class="axis-label" x="273.6" y="296" text-anchor="middle">1</text>
+<line class="gridline" x1="357.3" y1="20" x2="357.3" y2="280" />
+<text class="axis-label" x="357.3" y="296" text-anchor="middle">2</text>
+<line class="gridline" x1="440.9" y1="20" x2="440.9" y2="280" />
+<text class="axis-label" x="440.9" y="296" text-anchor="middle">3</text>
+<line class="gridline" x1="524.5" y1="20" x2="524.5" y2="280" />
+<text class="axis-label" x="524.5" y="296" text-anchor="middle">4</text>
+<line class="gridline" x1="608.2" y1="20" x2="608.2" y2="280" />
+<text class="axis-label" x="608.2" y="296" text-anchor="middle">5</text>
+<text class="bar-label" x="180" y="57.3" text-anchor="end">Pinned Quant</text>
+<rect class="bar" x="190" y="38.3" width="401.5" height="30" rx="4" style="fill:var(--s5)"><title>Pinned Quantized Vectors — 4.8 qps</title></rect>
+<text class="value-tip" x="599.5" y="57.3">4.8 qps</text>
+<text class="bar-label" x="180" y="105.7" text-anchor="end">Cached · Quant</text>
+<rect class="bar" x="190" y="86.7" width="334.5" height="30" rx="4" style="fill:var(--s2)"><title>Full Cached, With Quantization — 4.0 qps</title></rect>
+<text class="value-tip" x="532.5" y="105.7">4.0 qps</text>
+<text class="bar-label" x="180" y="154.0" text-anchor="end">Cached · No Quant</text>
+<rect class="bar" x="190" y="135.0" width="301.1" height="30" rx="4" style="fill:var(--s1)"><title>Full Cached, No Quantization — 3.6 qps</title></rect>
+<text class="value-tip" x="499.1" y="154.0">3.6 qps</text>
+<text class="bar-label" x="180" y="202.3" text-anchor="end">Cold · Quant</text>
+<rect class="bar" x="190" y="183.3" width="259.3" height="30" rx="4" style="fill:var(--s4)"><title>Full Cold, With Quantization — 3.1 qps</title></rect>
+<text class="value-tip" x="457.3" y="202.3">3.1 qps</text>
+<text class="bar-label" x="180" y="250.7" text-anchor="end">Cold · No Quant</text>
+<rect class="bar" x="190" y="231.7" width="200.7" height="30" rx="4" style="fill:var(--s3)"><title>Full Cold, No Quantization — 2.4 qps</title></rect>
+<text class="value-tip" x="398.7" y="250.7">2.4 qps</text>
+</svg>
+  </div>
+
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>Configuration</th><th class="num">QPS</th><th class="num">min (ms)</th><th class="num">p50 (ms)</th><th class="num">p95 (ms)</th><th class="num">p99 (ms)</th><th class="num">max (ms)</th><th class="num">mean (ms)</th></tr></thead>
+    <tbody>
+      <tr>
+      <td class="rowlabel"><span class="swatch" style="background:var(--s1)"></span>Full Cached, No Quantization</td>
+      <td class="num">3.6</td>
+      <td class="num">204.6</td>
+      <td class="num">303.1</td>
+      <td class="num">310.0</td>
+      <td class="num">326.9</td>
+      <td class="num">902.7</td>
+      <td class="num">278.0</td>
+    </tr>
+<tr>
+      <td class="rowlabel"><span class="swatch" style="background:var(--s2)"></span>Full Cached, With Quantization</td>
+      <td class="num">4.0</td>
+      <td class="num">184.0</td>
+      <td class="num">210.7</td>
+      <td class="num">361.1</td>
+      <td class="num">737.5</td>
+      <td class="num">1,699.4</td>
+      <td class="num">247.7</td>
+    </tr>
+<tr>
+      <td class="rowlabel"><span class="swatch" style="background:var(--s3)"></span>Full Cold, No Quantization</td>
+      <td class="num">2.4</td>
+      <td class="num">184.6</td>
+      <td class="num">211.4</td>
+      <td class="num">1,540.3</td>
+      <td class="num">3,933.8</td>
+      <td class="num">5,529.0</td>
+      <td class="num">424.9</td>
+    </tr>
+<tr>
+      <td class="rowlabel"><span class="swatch" style="background:var(--s4)"></span>Full Cold, With Quantization</td>
+      <td class="num">3.1</td>
+      <td class="num">204.8</td>
+      <td class="num">305.2</td>
+      <td class="num">427.8</td>
+      <td class="num">1,664.6</td>
+      <td class="num">3,687.3</td>
+      <td class="num">326.0</td>
+    </tr>
+<tr>
+      <td class="rowlabel"><span class="swatch" style="background:var(--s5)"></span>Pinned Quantized Vectors</td>
+      <td class="num">4.8</td>
+      <td class="num">182.9</td>
+      <td class="num">204.8</td>
+      <td class="num">223.4</td>
+      <td class="num">236.0</td>
+      <td class="num">1,024.6</td>
+      <td class="num">206.2</td>
+    </tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="memory">
+  <h2>3. Memory &amp; resource footprint</h2>
+  <p class="lede">
+    Qdrant's reported memory total splits into <b>dedicated RAM</b> (memory the process
+    commits and holds, non-evictable — what <code>pinned</code> tiers and index sidecars use)
+    and <b>OS page cache</b> (memory the kernel opportunistically fills with pages the
+    <code>cached</code> tier has touched — reclaimable under system pressure). The dashed tick marks
+    each configuration's on-disk collection size for reference.
+  </p>
+  <div class="card">
+    <svg class="chart" viewBox="0 0 720 380" role="img" aria-labelledby="c3title c3desc">
+<title id="c3title">Memory footprint by configuration</title>
+<desc id="c3desc">Stacked column chart: dedicated process RAM plus resident OS page cache, in gigabytes, per configuration. A tick marks each configuration's on-disk collection size.</desc>
+<line class="gridline" x1="60" y1="290.0" x2="700" y2="290.0" />
+<text class="axis-label" x="50" y="294.0" text-anchor="end">0 GB</text>
+<line class="gridline" x1="60" y1="235.8" x2="700" y2="235.8" />
+<text class="axis-label" x="50" y="239.8" text-anchor="end">5 GB</text>
+<line class="gridline" x1="60" y1="181.7" x2="700" y2="181.7" />
+<text class="axis-label" x="50" y="185.7" text-anchor="end">10 GB</text>
+<line class="gridline" x1="60" y1="127.5" x2="700" y2="127.5" />
+<text class="axis-label" x="50" y="131.5" text-anchor="end">15 GB</text>
+<line class="gridline" x1="60" y1="73.3" x2="700" y2="73.3" />
+<text class="axis-label" x="50" y="77.3" text-anchor="end">20 GB</text>
+<line class="axis-line" x1="60" y1="290.0" x2="700" y2="290.0" />
+<rect class="bar" x="108.3" y="288.3" width="70" height="1.7" style="fill:var(--s1)"><title>Full Cached, No Quantization — Dedicated RAM: 0.16 GB</title></rect>
+<rect class="bar" x="108.3" y="80.1" width="70" height="206.2" style="fill:var(--s2)"><title>Full Cached, No Quantization — OS Page Cache: 19.22 GB</title></rect>
+<line class="disk-tick" x1="105.3" y1="80.4" x2="181.3" y2="80.4"><title>Full Cached, No Quantization — on-disk size: 19.3 GB</title></line>
+<text class="value-tip-top" x="143.3" y="72.1" text-anchor="middle">19.38 GB</text>
+<text class="axis-label-x" x="143.3" y="310" text-anchor="middle">Cached</text>
+<text class="axis-label-x" x="143.3" y="326" text-anchor="middle">No Quant</text>
+<rect class="bar" x="226.7" y="288.3" width="70" height="1.7" style="fill:var(--s1)"><title>Full Cached, With Quantization — Dedicated RAM: 0.16 GB</title></rect>
+<rect class="bar" x="226.7" y="41.0" width="70" height="245.3" style="fill:var(--s2)"><title>Full Cached, With Quantization — OS Page Cache: 22.83 GB</title></rect>
+<line class="disk-tick" x1="223.7" y1="38.6" x2="299.7" y2="38.6"><title>Full Cached, With Quantization — on-disk size: 23.2 GB</title></line>
+<text class="value-tip-top" x="261.7" y="33.0" text-anchor="middle">22.99 GB</text>
+<text class="axis-label-x" x="261.7" y="310" text-anchor="middle">Cached</text>
+<text class="axis-label-x" x="261.7" y="326" text-anchor="middle">Quant</text>
+<rect class="bar" x="345.0" y="288.3" width="70" height="1.7" style="fill:var(--s1)"><title>Full Cold, No Quantization — Dedicated RAM: 0.16 GB</title></rect>
+<rect class="bar" x="345.0" y="111.5" width="70" height="174.8" style="fill:var(--s2)"><title>Full Cold, No Quantization — OS Page Cache: 16.32 GB</title></rect>
+<line class="disk-tick" x1="342.0" y1="80.5" x2="418.0" y2="80.5"><title>Full Cold, No Quantization — on-disk size: 19.3 GB</title></line>
+<text class="value-tip-top" x="380.0" y="103.5" text-anchor="middle">16.48 GB</text>
+<text class="axis-label-x" x="380.0" y="310" text-anchor="middle">Cold</text>
+<text class="axis-label-x" x="380.0" y="326" text-anchor="middle">No Quant</text>
+<rect class="bar" x="463.3" y="288.3" width="70" height="1.7" style="fill:var(--s1)"><title>Full Cold, With Quantization — Dedicated RAM: 0.16 GB</title></rect>
+<rect class="bar" x="463.3" y="235.9" width="70" height="50.4" style="fill:var(--s2)"><title>Full Cold, With Quantization — OS Page Cache: 4.83 GB</title></rect>
+<line class="disk-tick" x1="460.3" y1="38.2" x2="536.3" y2="38.2"><title>Full Cold, With Quantization — on-disk size: 23.2 GB</title></line>
+<text class="value-tip-top" x="498.3" y="227.9" text-anchor="middle">4.99 GB</text>
+<text class="axis-label-x" x="498.3" y="310" text-anchor="middle">Cold</text>
+<text class="axis-label-x" x="498.3" y="326" text-anchor="middle">Quant</text>
+<rect class="bar" x="581.7" y="233.0" width="70" height="57.0" style="fill:var(--s1)"><title>Pinned Quantized Vectors — Dedicated RAM: 5.26 GB</title></rect>
+<rect class="bar" x="581.7" y="222.5" width="70" height="8.5" style="fill:var(--s2)"><title>Pinned Quantized Vectors — OS Page Cache: 0.97 GB</title></rect>
+<line class="disk-tick" x1="578.7" y1="38.7" x2="654.7" y2="38.7"><title>Pinned Quantized Vectors — on-disk size: 23.2 GB</title></line>
+<text class="value-tip-top" x="616.7" y="214.5" text-anchor="middle">6.23 GB</text>
+<text class="axis-label-x" x="616.7" y="310" text-anchor="middle">Pinned Quant</text>
+</svg>
+    <div class="legend">
+      <span class="legend-item"><span class="legend-swatch" style="background:var(--s1)"></span>Dedicated RAM</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:var(--s2)"></span>OS page cache (resident)</span>
+      <span class="legend-item"><span class="legend-line" style="background:none;border-top:1.5px dashed var(--muted); height:0;"></span>On-disk collection size (hover for value)</span>
+    </div>
+  </div>
+
+  <div class="callout warn"><b>"Cached" is not free.</b> To hit its latency numbers, <b>Full Cached, With Quantization</b> needs ~22.8&nbsp;GB of the dataset's ~23.2&nbsp;GB resident in OS page cache — essentially the whole collection warmed into system memory that the instance must have spare, and that the kernel can evict under pressure from other workloads.</div>
+  <div class="callout win"><b>Pinned Quantized Vectors</b> needs only ~5.26&nbsp;GB of guaranteed, non-evictable RAM (the pinned quantized vectors plus payload-index sidecars) to reach its latency numbers — <b>3.7&times; less total memory</b> than the cached-with-quantization config, for a faster and far more consistent result.</div>
+  <div class="callout"><b>"Cold" drifts back toward "cached" under sustained load.</b> Full Cold, No Quantization started the run with only ~961&nbsp;MB cached, but 1,677 sequential queries over the full-precision float vectors pulled ~16.3&nbsp;GB back into the OS page cache by the end — most of the same memory pressure as the cached tier, plus the worse tail latency along the way. Cold-with-quantization stays much leaner (4.83&nbsp;GB final) because queries mostly touch the small quantized vectors, not the cold float ones.</div>
+
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>Configuration</th><th class="num">Dedicated RAM (GB)</th><th class="num">OS cache, end of run (GB)</th><th class="num">Total footprint (GB)</th><th class="num">On-disk size (GB)</th></tr></thead>
+    <tbody>
+      <tr>
+      <td class="rowlabel"><span class="swatch" style="background:var(--s1)"></span>Full Cached, No Quantization</td>
+      <td class="num">0.16</td>
+      <td class="num">19.22</td>
+      <td class="num">19.38</td>
+      <td class="num">19.3</td>
+    </tr>
+<tr>
+      <td class="rowlabel"><span class="swatch" style="background:var(--s2)"></span>Full Cached, With Quantization</td>
+      <td class="num">0.16</td>
+      <td class="num">22.83</td>
+      <td class="num">22.99</td>
+      <td class="num">23.2</td>
+    </tr>
+<tr>
+      <td class="rowlabel"><span class="swatch" style="background:var(--s3)"></span>Full Cold, No Quantization</td>
+      <td class="num">0.16</td>
+      <td class="num">16.32</td>
+      <td class="num">16.48</td>
+      <td class="num">19.3</td>
+    </tr>
+<tr>
+      <td class="rowlabel"><span class="swatch" style="background:var(--s4)"></span>Full Cold, With Quantization</td>
+      <td class="num">0.16</td>
+      <td class="num">4.83</td>
+      <td class="num">4.99</td>
+      <td class="num">23.2</td>
+    </tr>
+<tr>
+      <td class="rowlabel"><span class="swatch" style="background:var(--s5)"></span>Pinned Quantized Vectors</td>
+      <td class="num">5.26</td>
+      <td class="num">0.97</td>
+      <td class="num">6.23</td>
+      <td class="num">23.2</td>
+    </tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="frontier">
+  <h2>4. The efficiency frontier</h2>
+  <p class="lede">Plotting mean search latency against total memory footprint (dedicated RAM + resident OS cache) puts both axes on one chart. The bottom-left corner is the efficient corner: fast <em>and</em> lean.</p>
+  <div class="card">
+    <svg class="chart" viewBox="0 0 720 420" role="img" aria-labelledby="c4title c4desc">
+<title id="c4title">Efficiency frontier: mean search latency versus total memory footprint</title>
+<desc id="c4desc">Scatter plot, log-scale mean latency in milliseconds on the x-axis, total memory footprint in gigabytes (dedicated RAM plus OS page cache) on the y-axis. The bottom-left corner is the efficient corner: fast and lean.</desc>
+<line class="gridline" x1="105.4" y1="24" x2="105.4" y2="370" />
+<text class="axis-label" x="105.4" y="390" text-anchor="middle">200ms</text>
+<line class="gridline" x1="259.3" y1="24" x2="259.3" y2="370" />
+<text class="axis-label" x="259.3" y="390" text-anchor="middle">250ms</text>
+<line class="gridline" x1="385.1" y1="24" x2="385.1" y2="370" />
+<text class="axis-label" x="385.1" y="390" text-anchor="middle">300ms</text>
+<line class="gridline" x1="491.5" y1="24" x2="491.5" y2="370" />
+<text class="axis-label" x="491.5" y="390" text-anchor="middle">350ms</text>
+<line class="gridline" x1="583.6" y1="24" x2="583.6" y2="370" />
+<text class="axis-label" x="583.6" y="390" text-anchor="middle">400ms</text>
+<line class="gridline" x1="664.8" y1="24" x2="664.8" y2="370" />
+<text class="axis-label" x="664.8" y="390" text-anchor="middle">450ms</text>
+<line class="gridline" x1="70" y1="370.0" x2="680" y2="370.0" />
+<text class="axis-label" x="60" y="374.0" text-anchor="end">0 GB</text>
+<line class="gridline" x1="70" y1="297.9" x2="680" y2="297.9" />
+<text class="axis-label" x="60" y="301.9" text-anchor="end">5 GB</text>
+<line class="gridline" x1="70" y1="225.8" x2="680" y2="225.8" />
+<text class="axis-label" x="60" y="229.8" text-anchor="end">10 GB</text>
+<line class="gridline" x1="70" y1="153.8" x2="680" y2="153.8" />
+<text class="axis-label" x="60" y="157.8" text-anchor="end">15 GB</text>
+<line class="gridline" x1="70" y1="81.7" x2="680" y2="81.7" />
+<text class="axis-label" x="60" y="85.7" text-anchor="end">20 GB</text>
+<line class="axis-line" x1="70" y1="370.0" x2="680" y2="370.0" />
+<line class="axis-line" x1="70" y1="24.0" x2="70" y2="370.0" />
+<text class="corner-label" x="78" y="362">&#8592; faster / leaner</text>
+<circle class="marker-lg" cx="332.6" cy="90.6" r="7" style="fill:var(--s1)"><title>Full Cached, No Quantization — mean 278.0 ms, 19.38 GB total footprint</title></circle>
+<text class="point-label" x="342.6" y="84.6" text-anchor="start">Cached · No Quant</text>
+<circle class="marker-lg" cx="252.9" cy="38.6" r="7" style="fill:var(--s1)"><title>Full Cached, With Quantization — mean 247.7 ms, 22.99 GB total footprint</title></circle>
+<text class="point-label" x="262.9" y="52.6" text-anchor="start">Cached · Quant</text>
+<circle class="marker-lg" cx="625.3" cy="132.4" r="7" style="fill:var(--s1)"><title>Full Cold, No Quantization — mean 424.9 ms, 16.48 GB total footprint</title></circle>
+<text class="point-label" x="615.3" y="122.4" text-anchor="end">Cold · No Quant</text>
+<circle class="marker-lg" cx="442.5" cy="298.0" r="7" style="fill:var(--s1)"><title>Full Cold, With Quantization — mean 326.0 ms, 4.99 GB total footprint</title></circle>
+<text class="point-label" x="454.5" y="302.0" text-anchor="start">Cold · Quant</text>
+<circle class="marker-lg" cx="126.5" cy="280.2" r="7" style="fill:var(--s1)"><title>Pinned Quantized Vectors — mean 206.2 ms, 6.23 GB total footprint</title></circle>
+<text class="point-label" x="136.5" y="272.2" text-anchor="start">Pinned Quant</text>
+</svg>
+  </div>
+  <div class="callout win">Pinned Quantized Vectors sits alone in the efficient corner — lowest mean latency (206.2&nbsp;ms) at close to the lowest total footprint (6.23&nbsp;GB). The two cached configs match or beat it on mean latency only by carrying 3&ndash;4&times; the memory. The two cold configs undercut it on footprint (cold-with-quant: 4.99&nbsp;GB) but pay for it in mean latency and, more importantly, in tail latency (section 2).</div>
+</section>
+
+<section id="verdict">
+  <h2>5. Recommendation</h2>
+  <div class="verdict-grid">
+    <div class="verdict-card">
+      <div class="tag">Best overall</div>
+      <h4>Pinned Quantized Vectors</h4>
+      <p>Best latency at every percentile, best throughput (4.8 qps), and the most predictable tail — at a fixed, modest RAM cost (~5.3&nbsp;GB) instead of an opportunistic near-full-dataset cache. The clear choice when search latency and its consistency matter and ~5&nbsp;GB of guaranteed RAM per ~3.8M points is affordable.</p>
+    </div>
+    <div class="verdict-card">
+      <div class="tag">If RAM is abundant &amp; free</div>
+      <h4>Full Cached, With Quantization</h4>
+      <p>Second-best mean/p50 latency, but only by keeping ~23&nbsp;GB of the dataset resident in OS cache — reclaimable memory that must be sized for the whole collection, and a bigger disk footprint (quantized vectors stored alongside full vectors).</p>
+    </div>
+    <div class="verdict-card">
+      <div class="tag">Memory-constrained, latency-tolerant</div>
+      <h4>Full Cold, With Quantization</h4>
+      <p>Leanest steady-state footprint of the quantized configs (4.99&nbsp;GB) with a moderate tail (p99 1.66&nbsp;s). A reasonable fallback when RAM is scarce and occasional multi-hundred-ms to low-second stalls are acceptable.</p>
+    </div>
+    <div class="verdict-card">
+      <div class="tag">Avoid</div>
+      <h4>Full Cold, No Quantization</h4>
+      <p>Worst on every latency measure (p99 3.93&nbsp;s, max 5.53&nbsp;s) and its OS-cache footprint balloons back up to 16.3&nbsp;GB under sustained querying anyway — the worst of both worlds once the workload runs long enough to warm the cache.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <b>Methodology notes &amp; caveats</b>
+  <ul>
+    <li>Search benchmark: 1,677 sequential (non-concurrent) queries per configuration against the same 3,750,897-point collection (<code>msmarco_v2.1_doc_segmented_*.parquet</code>), one query at a time — these are single-stream latency numbers, not concurrent-load numbers.</li>
+    <li><b>Pinned Quantized Vectors</b> leaves <code>--payload-memory</code> / <code>--payload-index-memory</code> unset (server defaults) while every other configuration explicitly pins payload storage to match its dense-vector tier. Its memory/latency advantage is driven by the pinned quantized vectors, but the payload-tier default is a confound this run doesn't isolate.</li>
+    <li>Upload-time logs for <b>Full Cached, No Quantization</b> and <b>Full Cached, With Quantization</b> only captured the second of two upload invocations (1,990,717 of 3,750,897 points) — their total ingestion time isn't directly comparable to the cold configs, whose logs captured both halves. This report only uses their <code>metrics.txt</code> (search) data, which reflects the full, completed collection.</li>
+    <li>Hardware/CPU/network utilization was not reported by the server for this run ("hardware reporting disabled") — the resource-efficiency comparison here is therefore based on Qdrant's reported memory-tier accounting (RAM, OS page cache, disk), not host-level CPU or I/O metrics.</li>
+    <li>"OS page cache, end of run" is the second (post-benchmark) value from each <code>metrics.txt</code> memory snapshot; it reflects cache state after the full 1,677-query run, not a steady-state average.</li>
+  </ul>
+</footer>
+
+</div>

@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Qdrant Memory Tiers — Benchmark Reports</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg:        #f9f9f7;
+    --surface:   #fcfcfb;
+    --text:      #0b0b0b;
+    --text-2:    #52514e;
+    --muted:     #898781;
+    --grid:      #e1e0d9;
+    --border:    rgba(11,11,11,0.10);
+    --accent:    #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg:        #0d0d0d;
+      --surface:   #1a1a19;
+      --text:      #ffffff;
+      --text-2:    #c3c2b7;
+      --muted:     #898781;
+      --grid:      #2c2c2a;
+      --border:    rgba(255,255,255,0.10);
+      --accent:    #3987e5;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg:        #0d0d0d;
+    --surface:   #1a1a19;
+    --text:      #ffffff;
+    --text-2:    #c3c2b7;
+    --muted:     #898781;
+    --grid:      #2c2c2a;
+    --border:    rgba(255,255,255,0.10);
+    --accent:    #3987e5;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.55;
+    margin: 0;
+    padding: 0 20px 64px;
+  }
+  .wrap { max-width: 780px; margin: 0 auto; }
+
+  header.page { padding: 56px 0 8px; }
+  h1 { font-size: 1.7rem; font-weight: 700; margin: 0 0 10px; letter-spacing: -0.01em; }
+  .subtitle { color: var(--text-2); font-size: 1.02rem; margin: 0 0 8px; max-width: 620px; }
+  .repo-link { color: var(--text-2); font-size: 0.88rem; }
+  .repo-link a { color: var(--accent); text-decoration: none; }
+  .repo-link a:hover { text-decoration: underline; }
+
+  .list { margin: 32px 0; display: flex; flex-direction: column; gap: 14px; }
+
+  a.card {
+    display: block;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 22px;
+    text-decoration: none;
+    color: var(--text);
+    transition: border-color 0.15s ease;
+  }
+  a.card:hover { border-color: var(--accent); }
+  a.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .card-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .card-title { font-size: 1.05rem; font-weight: 700; margin: 0; }
+  .card-arrow { color: var(--accent); font-size: 0.86rem; font-weight: 600; flex: none; white-space: nowrap; }
+  .card-desc { color: var(--text-2); font-size: 0.92rem; margin: 6px 0 12px; max-width: 640px; }
+  .card-meta { display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill {
+    display: inline-flex; align-items: center;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 999px; padding: 4px 10px; font-size: 0.76rem; color: var(--muted);
+  }
+
+  footer { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--grid); color: var(--muted); font-size: 0.82rem; }
+  footer code { background: var(--grid); border-radius: 4px; padding: 1px 5px; font-size: 0.9em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="page">
+  <h1>Qdrant Memory Tiers — Benchmark Reports</h1>
+  <p class="subtitle">
+    Search-latency and resource-efficiency comparisons across Qdrant's per-component memory-tier
+    settings (<code>cached</code>, <code>cold</code>, <code>pinned</code>) for dense vectors, payloads,
+    payload indexes, and quantized vectors — run against the MS&nbsp;MARCO v2.1 passage embeddings dataset.
+  </p>
+  <p class="repo-link">Source &amp; benchmark scripts: <a href="https://github.com/qdrant-labs/memory-tiers-explained">qdrant-labs/memory-tiers-explained</a></p>
+</header>
+
+<div class="list">
+
+  <a class="card" href="1.8M/report.html">
+    <div class="card-top">
+      <p class="card-title">1.8M Passage Benchmark</p>
+      <span class="card-arrow">View report →</span>
+    </div>
+    <p class="card-desc">Local single-node baseline across 5 memory-tier presets — the first read on how <code>cached</code>, <code>cold</code>, and quantization trade off, ahead of the cloud-cluster run at higher scale.</p>
+    <div class="card-meta">
+      <span class="pill">1,760,180 points</span>
+      <span class="pill">1,677-query sequential search</span>
+      <span class="pill">5 presets</span>
+    </div>
+  </a>
+
+  <a class="card" href="1.8M-turbo/report.html">
+    <div class="card-top">
+      <p class="card-title">Scalar vs TurboQuant — 1.8M Passage Benchmark</p>
+      <span class="card-arrow">View report →</span>
+    </div>
+    <p class="card-desc">Same dataset, same two quantized presets (Cached, Cold) — only the quantization method changes, scalar int8 vs. TurboQuant 4-bit, isolating its effect within each memory tier.</p>
+    <div class="card-meta">
+      <span class="pill">1,760,180 points</span>
+      <span class="pill">1,677-query sequential search</span>
+      <span class="pill">Scalar vs TurboQuant</span>
+    </div>
+  </a>
+
+  <a class="card" href="3.8M/report.html">
+    <div class="card-top">
+      <p class="card-title">Memory Tiers on 3.8M Points</p>
+      <span class="card-arrow">View report →</span>
+    </div>
+    <p class="card-desc">Five memory-tier layouts benchmarked on a Qdrant Cloud cluster at roughly double the scale, comparing search latency and memory footprint to find the best latency-per-gigabyte trade-off.</p>
+    <div class="card-meta">
+      <span class="pill">3,750,897 points</span>
+      <span class="pill">1,677-query sequential search</span>
+      <span class="pill">Qdrant Cloud</span>
+    </div>
+  </a>
+
+</div>
+
+<footer>
+  Each report is generated from raw data under <code>results/&lt;dataset-size&gt;/&lt;preset-name&gt;/</code>
+  (<code>config.txt</code>, <code>upload.txt</code>, <code>metrics.txt</code>) — see the repo README for how
+  each benchmark preset in <code>scripts/</code> was run.
+</footer>
+
+</div>
+</body>
+</html>
