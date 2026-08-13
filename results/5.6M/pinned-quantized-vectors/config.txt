@@ -1,0 +1,26 @@
+MemoryTiersSetup {
+    dense_vectors: Some(
+        Cold,
+    ),
+    hnsw_config: Some(
+        HnswTierConfig {
+            memory_tier: None,
+            use_inline_storage: false,
+        },
+    ),
+    quantization: Some(
+        QuantizationTierConfig {
+            memory_tier: Some(
+                Pinned,
+            ),
+            quantized: true,
+            use_turboquant: false,
+        },
+    ),
+    sparse_vector_index: None,
+    use_sparse: false,
+    payloads: None,
+    payload_index: None,
+    mmap_threshold: None,
+    indexing_theshold: None,
+}

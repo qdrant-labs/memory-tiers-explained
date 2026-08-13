@@ -1,0 +1,6 @@
+Upload done! Total points: 1760180, total batches: 215, total upload time: 4221.277s (0.1 batches/s)
+batch upload latency: min=9.480542355s p50/median=14.141445659s p95=48.470945209s p99=74.175610074s max=131.413161677s mean=19.379578117s
+Upload done! Total points: 1990717, total batches: 244, total upload time: 3706.056s (0.1 batches/s)
+batch upload latency: min=1.072734003s p50/median=12.309680228s p95=28.269636787s p99=50.474552319s max=57.295945409s mean=15.026133763s
+Upload done! Total points: 1898129, total batches: 232, total upload time: 3879.143s (0.1 batches/s)
+batch upload latency: min=9.156899776s p50/median=10.988470155s p95=37.392660748s p99=96.652170906s max=120.261673656s mean=16.574704063s
