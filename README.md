@@ -18,9 +18,14 @@ MS MARCO passage embeddings, run search benchmarks, and record the results for c
 - `configs/` — Qdrant server config overlays used by the two `compose.yaml` variants (`base.yaml`,
   `io-uring.yaml`).
 - `scripts/` — shell scripts that orchestrate full end-to-end benchmark runs (setup → upload → wait
-  for green → search → teardown) for different memory-tier presets.
+  for green → search → teardown) for different memory-tier presets. `scripts/cloud/` mirrors the
+  same presets for runs against a Qdrant Cloud cluster, and `scripts/turbo/` swaps scalar int8 for
+  TurboQuant quantization on the two quantized presets.
 - `results/` — captured output (`config.txt`, `upload.txt`, `metrics.txt`) from past benchmark
   runs, organized by dataset size and preset name.
+- `reports/` — static HTML report per dataset size, built from `results/`, plus an `index.html`
+  linking them. Deployed to GitHub Pages on every push to `main` (see
+  `.github/workflows/pages.yaml`) at `https://qdrant-labs.github.io/memory-tiers-explained/`.
 - `compose.yaml` / `compose.io-uring.yaml` — local Qdrant via Docker Compose, with/without
   `io_uring` async scoring enabled.
 
@@ -81,7 +86,8 @@ Key options (see `crates/collection-setup/src/main.rs` for the full list):
 | `--dense-vectors-memory <tier>` | Memory tier for the dense vector storage |
 | `--hnsw-memory <tier>` | Memory tier for the HNSW graph |
 | `--hnsw-inline-storage` | Store the HNSW graph inline instead of a separate tier |
-| `--quantize` | Enable quantization (scalar int8) |
+| `--quantize` | Enable quantization (scalar int8 by default) |
+| `--use-turboquant` | Use TurboQuant instead of scalar int8 (requires `--quantize`) |
 | `--quantized-vectors-memory <tier>` | Memory tier for the quantized vectors |
 | `--use-sparse` / `--sparse-vector-index-memory <tier>` | Enable a sparse vector index and its tier |
 | `--payload-memory <tier>` | Memory tier for payload storage |
@@ -113,10 +119,17 @@ Both print latency stats (min/mean/p50/p95/p99/max) and throughput.
 is `green`, runs the search benchmark, and deletes the collection:
 
 - `full-cached-no-quantization.sh <num_parquet_files>` — everything in the `cached` tier
-- `full-cached-w-quantization.sh <num_parquet_files>` — `cached` tier + scalar/TurboQuant quantization
-- `full-cold-no-quantization.sh <num_parquet_files>` — everything in the `cold` tier, HNSW inline storage
-- `full-cold-w-quantization.sh <num_parquet_files>` — `cold` tier + quantization
-- `high-speed-recommendation.sh <num_parquet_files>` — `cold` dense vectors/HNSW with `pinned` quantized vectors
+- `full-cached-w-quantization.sh <num_parquet_files>` — `cached` tier + scalar int8 quantization
+- `full-cold-no-quantization.sh <num_parquet_files>` — everything in the `cold` tier
+- `full-cold-w-quantization.sh <num_parquet_files>` — `cold` tier + quantization, with HNSW inline
+  storage enabled
+- `high-speed-recommendation.sh <num_parquet_files>` — `cold` dense vectors/HNSW with `pinned`
+  quantized vectors, also with HNSW inline storage enabled
+
+Inline storage (`--hnsw-inline-storage`) only shows up paired with quantization; the no-quantization
+presets never enable it. `scripts/cloud/` carries the same five presets (the last one renamed
+`pinned-quantized-vectors.sh`) for runs against Qdrant Cloud, with inline storage left off across the
+board. `scripts/turbo/` has TurboQuant versions of the two `*-w-quantization.sh` scripts.
 
 Each takes the number of `msmarco_v2.1_doc_segmented_NN.parquet` files to upload (0-indexed).
 Standalone helpers: `scripts/poll-for-green.sh <collection>` and
@@ -129,3 +142,5 @@ Standalone helpers: `scripts/poll-for-green.sh <collection>` and
 - `config.txt` — the `MemoryTiersSetup` used to create the collection
 - `upload.txt` — upload throughput/latency summary
 - `metrics.txt` — search benchmark latency/throughput summary
+
+`reports/<dataset-size>/` turns those into a browsable HTML report.
