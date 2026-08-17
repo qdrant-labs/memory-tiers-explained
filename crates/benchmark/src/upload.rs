@@ -1,7 +1,8 @@
 use datafusion::{
     arrow::{
         array::{Array, AsArray, Float32Array, Int64Array, StringArray},
-        datatypes::Float32Type,
+        compute::cast,
+        datatypes::{DataType, Field, Float32Type},
     },
     error::DataFusionError,
     execution::{config::SessionConfig, context::SessionContext, options::ParquetReadOptions},
@@ -77,6 +78,8 @@ pub enum LoadError {
     QdrantError(#[from] QdrantError),
     #[error(transparent)]
     DataFusionError(#[from] DataFusionError),
+    #[error(transparent)]
+    ArrowError(#[from] datafusion::arrow::error::ArrowError),
 }
 
 pub async fn load_embeddings(
@@ -109,10 +112,19 @@ pub async fn load_embeddings(
     let upload_start = Instant::now();
     while let Some(batch) = stream.next().await {
         let batch = batch?;
-        let embedding_col = batch.column(0).as_list::<i32>();
-        let docid_col: &StringArray = batch.column(1).as_string();
-        let url_col: &StringArray = batch.column(2).as_string();
-        let title_col: &StringArray = batch.column(3).as_string();
+
+        // Some parquet files (e.g. ones re-written by duckdb/pandas) store these
+        // columns as LargeList/LargeUtf8 instead of List/Utf8. Normalize before
+        // downcasting so both variants are read correctly.
+        let emb_field = std::sync::Arc::new(Field::new("item", DataType::Float32, true));
+        let embedding_col = cast(batch.column(0), &DataType::List(emb_field))?;
+        let embedding_col = embedding_col.as_list::<i32>();
+        let docid_col = cast(batch.column(1), &DataType::Utf8)?;
+        let docid_col: &StringArray = docid_col.as_string();
+        let url_col = cast(batch.column(2), &DataType::Utf8)?;
+        let url_col: &StringArray = url_col.as_string();
+        let title_col = cast(batch.column(3), &DataType::Utf8)?;
+        let title_col: &StringArray = title_col.as_string();
         let start_char_col: &Int64Array = batch.column(4).as_primitive();
         let end_char_col: &Int64Array = batch.column(5).as_primitive();
 

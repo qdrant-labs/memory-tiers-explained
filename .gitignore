@@ -1,3 +1,9 @@
 target/
 .env
 storage/
+.agents/
+.claude/
+scripts/write-and-review-loop.sh
+*.md
+!README.md
+.useful-links
